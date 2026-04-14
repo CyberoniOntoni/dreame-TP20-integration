@@ -1,8 +1,15 @@
-"""Dreame Air Purifier Cloud API Client."""
+"""AirPursue PM10 Cloud API Client — fully async with data-driven property registry."""
+from __future__ import annotations
+
 import hashlib
 import logging
-import requests
 import time
+from dataclasses import dataclass
+from typing import Any, Callable
+
+import aiohttp
+
+from .const import MODE_AUTO, MODE_NAMES, SWIVEL_OPTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -12,65 +19,87 @@ DREAME_AUTH_BASIC = "Basic ZHJlYW1lX2FwcHYxOkFQXmR2QHpAU1FZVnhOODg="
 DREAME_TENANT_ID = "000000"
 DREAME_RLC = "1c80b3787b2266776bcdc481f37d8fa42ba10a30af81a6df-1"
 
-# === MiOT Property Map for dreame.airp.u2507 (Dreame AP10) ===
-# VERIFIED by live testing 2025-02-15
+_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
-# siid 2: Air Purifier Control
-PROP_POWER = {"siid": 2, "piid": 1}         # int: 1=on, 2=standby/off
-PROP_MODE = {"siid": 2, "piid": 3}          # int: 0=Auto, 2=Sleep, 3=Custom, 4=Pet
-PROP_FAN_SPEED = {"siid": 2, "piid": 4}     # int: 1-5 fan speed level
-PROP_FAN_PCT = {"siid": 2, "piid": 5}       # int: percentage (read-only)
-PROP_IONIZER = {"siid": 2, "piid": 6}       # int: -1=auto, 0=off, 1=on
+# ── Data-driven MiOT property registry ─────────────────────────────────
 
-# siid 3: Environment Sensors
-PROP_AQ_LEVEL = {"siid": 3, "piid": 4}
-PROP_PM25 = {"siid": 3, "piid": 5}
 
-# siid 4: Filter
-PROP_FILTER_LIFE = {"siid": 4, "piid": 1}
-PROP_FILTER_DAYS = {"siid": 4, "piid": 2}
-PROP_FILTER_USED = {"siid": 4, "piid": 3}
+@dataclass(frozen=True, slots=True)
+class PropDef:
+    """Single MiOT property: maps (siid, piid) → named attribute on DreameAirPurifier."""
 
-# siid 6: Device Settings
-PROP_LED = {"siid": 6, "piid": 5}
-PROP_BUZZER = {"siid": 6, "piid": 6}
-PROP_CHILD_LOCK = {"siid": 6, "piid": 7}
-PROP_LIGHT_MODE = {"siid": 6, "piid": 8}
+    attr: str
+    siid: int
+    piid: int
+    default: Any = 0
+    coerce: Callable[[Any], Any] | None = None
 
-# Poll batches (small to avoid timeout)
-POLL_BATCHES = [
-    [PROP_POWER, PROP_MODE, PROP_FAN_SPEED, PROP_FAN_PCT, PROP_IONIZER],
-    [PROP_AQ_LEVEL, PROP_PM25],
-    [PROP_FILTER_LIFE, PROP_FILTER_DAYS, PROP_FILTER_USED],
-    [PROP_LED, PROP_BUZZER, PROP_CHILD_LOCK, PROP_LIGHT_MODE],
-]
 
-# Mode mapping (VERIFIED)
-MODE_AUTO = 0
-MODE_SLEEP = 2
-MODE_CUSTOM = 3
-MODE_PET = 4
+PROP_DEFS: tuple[PropDef, ...] = (
+    # siid 2 — Control
+    PropDef("power",                2,  1, 0),
+    PropDef("mode_value",           2,  3, MODE_AUTO),
+    PropDef("fan_speed",            2,  4, 0),
+    PropDef("swivel",               2,  7, 0),
+    PropDef("auto_fan_raw",         2,  8, 0),
+    PropDef("continuous_monitoring", 2, 10, False, bool),
+    # siid 3 — Sensors
+    PropDef("humidity",             3,  2, 0),
+    PropDef("temperature",          3,  3, 0),
+    PropDef("air_quality_level",    3,  4, 0),
+    PropDef("pm25",                 3,  5, 0),
+    PropDef("pm10_value",           3,  6, 0),
+    PropDef("hcho",                 3,  7, 0),
+    PropDef("tvoc",                 3,  8, 0),
+    PropDef("pm1",                  3, 10, 0),
+    PropDef("aq_percent",           3, 12, 0, lambda v: max(0, min(100, 100 - int(v)))),
+    # siid 4 — HEPA filter
+    PropDef("hepa_life",            4,  1, 0),
+    PropDef("hepa_days_total",      4,  2, 720),
+    PropDef("hepa_hours_used",      4,  3, 0),
+    # siid 5 — Carbon filter
+    PropDef("carbon_life",          5,  1, 0),
+    PropDef("carbon_days_total",    5,  2, 360),
+    PropDef("carbon_hours_used",    5,  3, 0),
+    # siid 6 — Settings
+    PropDef("temp_unit",            6,  4, 0),
+    PropDef("human_sensing",        6,  5, False, bool),
+    PropDef("follow_mode",          6,  6, False, bool),
+    PropDef("voice_assistant",      6,  7, False, bool),
+    PropDef("timer",                6,  8, 0),
+)
 
-MODE_NAMES = {MODE_AUTO: "Auto", MODE_SLEEP: "Sleep", MODE_CUSTOM: "Custom", MODE_PET: "Pet"}
-MODE_NAME_TO_VALUE = {v: k for k, v in MODE_NAMES.items()}
+# Pre-compute poll batches (≤15 props per request)
+_BATCH_SIZE = 15
+_POLL_BATCHES: tuple[tuple[PropDef, ...], ...] = tuple(
+    tuple(PROP_DEFS[i : i + _BATCH_SIZE])
+    for i in range(0, len(PROP_DEFS), _BATCH_SIZE)
+)
 
-# Power: MUST use toggle action (set_properties times out on siid 2 piid 1)
-ACTION_TOGGLE_POWER = {"siid": 2, "aiid": 3}
+ACTION_TOGGLE_POWER = (2, 3)  # (siid, aiid)
+
+
+# ── Cloud API ──────────────────────────────────────────────────────────
 
 
 class DreameCloudAPI:
-    """Client for the Dreame Cloud API."""
+    """Async client for the Dreame Cloud API using aiohttp."""
 
-    def __init__(self, username: str, password: str, country: str = "us"):
+    __slots__ = (
+        "_session", "_username", "_password", "_country",
+        "_access_token", "_refresh_token", "_uid", "_tenant_id", "_token_expire",
+    )
+
+    def __init__(self, session: aiohttp.ClientSession, username: str, password: str, country: str = "us"):
+        self._session = session
         self._username = username
         self._password = password
         self._country = country
-        self._session = requests.Session()
-        self._access_token = None
-        self._refresh_token = None
-        self._uid = None
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._uid: str | None = None
         self._tenant_id = DREAME_TENANT_ID
-        self._token_expire = None
+        self._token_expire: float | None = None
 
     @property
     def api_url(self) -> str:
@@ -80,267 +109,287 @@ class DreameCloudAPI:
     def logged_in(self) -> bool:
         return self._access_token is not None
 
-    def login(self) -> bool:
+    # ── Auth ────────────────────────────────────────────────────────────
+
+    async def login(self) -> bool:
         url = f"{self.api_url}/dreame-auth/oauth/token"
-        pw_hash = hashlib.md5((self._password + DREAME_SALT).encode("utf-8")).hexdigest()
-        data = f"platform=IOS&scope=all&grant_type=password&username={self._username}&password={pw_hash}&type=account"
+        pw_hash = hashlib.md5((self._password + DREAME_SALT).encode()).hexdigest()
+        data = (
+            f"platform=IOS&scope=all&grant_type=password"
+            f"&username={self._username}&password={pw_hash}&type=account"
+        )
         headers = {
-            "User-Agent": DREAME_USER_AGENT, "Authorization": DREAME_AUTH_BASIC,
-            "Tenant-Id": DREAME_TENANT_ID, "Content-Type": "application/x-www-form-urlencoded", "Accept": "*/*",
+            "User-Agent": DREAME_USER_AGENT,
+            "Authorization": DREAME_AUTH_BASIC,
+            "Tenant-Id": DREAME_TENANT_ID,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "*/*",
         }
         if self._country == "cn":
             headers["Dreame-Rlc"] = DREAME_RLC
         try:
-            response = self._session.post(url, headers=headers, data=data, timeout=10)
-            if response.status_code == 200:
-                result = response.json()
-                if "access_token" in result:
-                    self._access_token = result["access_token"]
-                    self._refresh_token = result.get("refresh_token")
-                    self._uid = result.get("uid")
-                    self._tenant_id = result.get("tenant_id", DREAME_TENANT_ID)
-                    self._token_expire = time.time() + result.get("expires_in", 3600) - 120
-                    return True
-                _LOGGER.error("Login failed: %s", result)
-            else:
-                _LOGGER.error("Login failed (HTTP %s): %s", response.status_code, response.text)
-        except Exception as ex:
+            async with self._session.post(url, headers=headers, data=data, timeout=_TIMEOUT) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if "access_token" in result:
+                        self._access_token = result["access_token"]
+                        self._refresh_token = result.get("refresh_token")
+                        self._uid = result.get("uid")
+                        self._tenant_id = result.get("tenant_id", DREAME_TENANT_ID)
+                        self._token_expire = time.time() + result.get("expires_in", 3600) - 300
+                        return True
+                    _LOGGER.error("Login failed: %s", result)
+                else:
+                    body = await resp.text()
+                    _LOGGER.error("Login HTTP %s: %s", resp.status, body)
+        except (aiohttp.ClientError, TimeoutError) as ex:
             _LOGGER.error("Login error: %s", ex)
         return False
 
-    def _refresh_login(self) -> bool:
-        if self._refresh_token and self._token_expire and time.time() > self._token_expire:
-            url = f"{self.api_url}/dreame-auth/oauth/token"
-            data = f"platform=IOS&scope=all&grant_type=refresh_token&refresh_token={self._refresh_token}"
-            headers = {"User-Agent": DREAME_USER_AGENT, "Authorization": DREAME_AUTH_BASIC,
-                       "Tenant-Id": self._tenant_id, "Content-Type": "application/x-www-form-urlencoded"}
-            try:
-                r = self._session.post(url, headers=headers, data=data, timeout=10)
-                if r.status_code == 200:
-                    result = r.json()
+    async def _ensure_token(self) -> bool:
+        if not self._refresh_token or not self._token_expire or time.time() <= self._token_expire:
+            return True
+        url = f"{self.api_url}/dreame-auth/oauth/token"
+        data = f"platform=IOS&scope=all&grant_type=refresh_token&refresh_token={self._refresh_token}"
+        headers = {
+            "User-Agent": DREAME_USER_AGENT,
+            "Authorization": DREAME_AUTH_BASIC,
+            "Tenant-Id": self._tenant_id,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        try:
+            async with self._session.post(url, headers=headers, data=data, timeout=_TIMEOUT) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
                     if "access_token" in result:
                         self._access_token = result["access_token"]
                         self._refresh_token = result.get("refresh_token", self._refresh_token)
-                        self._token_expire = time.time() + result.get("expires_in", 3600) - 120
+                        self._token_expire = time.time() + result.get("expires_in", 3600) - 300
                         return True
-            except Exception as ex:
-                _LOGGER.warning("Token refresh failed: %s", ex)
-            return self.login()
-        return True
+        except (aiohttp.ClientError, TimeoutError) as ex:
+            _LOGGER.warning("Token refresh failed: %s", ex)
+        return await self.login()
 
-    def _auth_headers(self) -> dict:
-        return {"User-Agent": DREAME_USER_AGENT, "Authorization": DREAME_AUTH_BASIC,
-                "Tenant-Id": self._tenant_id, "Dreame-Auth": self._access_token,
-                "Content-Type": "application/json", "Accept": "*/*"}
+    def _auth_headers(self) -> dict[str, str]:
+        return {
+            "User-Agent": DREAME_USER_AGENT,
+            "Authorization": DREAME_AUTH_BASIC,
+            "Tenant-Id": self._tenant_id,
+            "Dreame-Auth": self._access_token,
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+        }
 
-    def get_devices(self) -> list | None:
-        if not self._refresh_login():
-            return None
-        url = f"{self.api_url}/dreame-user-iot/iotuserbind/device/listV2"
-        try:
-            r = self._session.post(url, headers=self._auth_headers(), json={}, timeout=10)
-            if r.status_code == 200:
-                result = r.json()
-                if result.get("code") == 0 and "data" in result:
-                    return result["data"]["page"]["records"]
-        except Exception as ex:
-            _LOGGER.error("Failed to get devices: %s", ex)
-        return None
+    # ── Transport ───────────────────────────────────────────────────────
 
-    def get_purifiers(self) -> list:
-        devices = self.get_devices()
-        if not devices:
-            return []
-        return [d for d in devices if ".airp." in d.get("model", "")]
-
-    def send_command(self, did: str, method: str, params, host: str = None):
-        if not self._refresh_login():
+    async def send_command(self, did: str, method: str, params: Any, host: str | None = None) -> Any:
+        if not await self._ensure_token():
             return None
         host_prefix = f"-{host.split('.')[0]}" if host else ""
         url = f"{self.api_url}/dreame-iot-com{host_prefix}/device/sendCommand"
-        payload = {"did": str(did), "id": 1, "data": {"did": str(did), "id": 1, "method": method, "params": params}}
+        payload = {"did": did, "id": 1, "data": {"did": did, "id": 1, "method": method, "params": params}}
         try:
-            r = self._session.post(url, headers=self._auth_headers(), json=payload, timeout=10)
-            if r.status_code == 200:
-                result = r.json()
-                if result.get("code") == 0:
-                    if result.get("data") and "result" in result["data"]:
-                        return result["data"]["result"]
-                    if result.get("success"):
-                        return {"code": 0}
-            elif r.status_code == 401:
-                if self.login():
-                    return self.send_command(did, method, params, host)
-        except Exception as ex:
+            async with self._session.post(url, headers=self._auth_headers(), json=payload, timeout=_TIMEOUT) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result.get("code") == 0:
+                        data = result.get("data")
+                        if data and "result" in data:
+                            return data["result"]
+                        if result.get("success"):
+                            return {"code": 0}
+                elif resp.status == 401:
+                    if await self.login():
+                        return await self.send_command(did, method, params, host)
+        except (aiohttp.ClientError, TimeoutError) as ex:
             _LOGGER.error("Command failed: %s", ex)
         return None
 
-    def get_properties(self, did: str, properties: list, host: str = None) -> dict:
-        params = [{"did": str(did), "siid": p["siid"], "piid": p["piid"]} for p in properties]
-        result = self.send_command(did, "get_properties", params, host)
-        values = {}
+    # ── High-level operations ───────────────────────────────────────────
+
+    async def get_properties(self, did: str, prop_defs: tuple[PropDef, ...], host: str | None = None) -> dict[tuple[int, int], Any]:
+        params = [{"did": did, "siid": p.siid, "piid": p.piid} for p in prop_defs]
+        result = await self.send_command(did, "get_properties", params, host)
+        values: dict[tuple[int, int], Any] = {}
         if result and isinstance(result, list):
             for prop in result:
                 if prop.get("code", -1) == 0:
                     values[(prop["siid"], prop["piid"])] = prop.get("value")
         return values
 
-    def set_property(self, did: str, siid: int, piid: int, value, host: str = None) -> bool:
-        result = self.send_command(did, "set_properties", [{"did": str(did), "siid": siid, "piid": piid, "value": value}], host)
-        if result and isinstance(result, list) and len(result) > 0:
-            return result[0].get("code", -1) == 0
-        return False
+    async def set_property(self, did: str, siid: int, piid: int, value: Any, host: str | None = None) -> bool:
+        params = [{"did": did, "siid": siid, "piid": piid, "value": value}]
+        result = await self.send_command(did, "set_properties", params, host)
+        return bool(result and isinstance(result, list) and result and result[0].get("code", -1) == 0)
 
-    def call_action(self, did: str, siid: int, aiid: int, params: list = None, host: str = None) -> bool:
-        result = self.send_command(did, "action", {"did": str(did), "siid": siid, "aiid": aiid, "in": params or []}, host)
+    async def call_action(self, did: str, siid: int, aiid: int, params: list | None = None, host: str | None = None) -> bool:
+        payload = {"did": did, "siid": siid, "aiid": aiid, "in": params or []}
+        result = await self.send_command(did, "action", payload, host)
         if result:
             return result.get("code", -1) == 0 if isinstance(result, dict) else True
         return False
 
+    async def get_devices(self) -> list | None:
+        if not await self._ensure_token():
+            return None
+        url = f"{self.api_url}/dreame-user-iot/iotuserbind/device/listV2"
+        try:
+            async with self._session.post(url, headers=self._auth_headers(), json={}, timeout=_TIMEOUT) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result.get("code") == 0 and "data" in result:
+                        return result["data"]["page"]["records"]
+        except (aiohttp.ClientError, TimeoutError) as ex:
+            _LOGGER.error("Failed to get devices: %s", ex)
+        return None
+
+    async def get_purifiers(self) -> list:
+        devices = await self.get_devices()
+        if not devices:
+            return []
+        return [d for d in devices if ".airp." in d.get("model", "")]
+
+
+# ── Device model ───────────────────────────────────────────────────────
+
 
 class DreameAirPurifier:
-    """Represents a single Dreame Air Purifier device."""
+    """AirPursue PM10 device backed by a data-driven property registry.
+
+    All properties defined in PROP_DEFS are accessible as attributes via __getattr__.
+    Derived properties (is_on, mode, fan_speed_percent, auto_fan) are explicit.
+    """
+
+    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available")
 
     def __init__(self, api: DreameCloudAPI, device_info: dict):
         self._api = api
         self._did = str(device_info["did"])
-        self._host = device_info.get("bindDomain")
-        self._model = device_info.get("model", "unknown")
-        self._mac = device_info.get("mac", "")
-        self._name = device_info.get("customName") or device_info.get("deviceInfo", {}).get("displayName", "Dreame Air Purifier")
-        self._power = False
-        self._mode = MODE_AUTO
-        self._fan_speed = 0
-        self._fan_pct = 0
-        self._ionizer = False
-        self._pm25 = 0
-        self._aq_level = 0
-        self._filter_life = 100
-        self._filter_days = 365
-        self._filter_used = 0
-        self._led = False
-        self._buzzer = False
-        self._child_lock = False
-        self._light_mode = 0
+        self._host: str | None = device_info.get("bindDomain")
+        self._model: str = device_info.get("model", "unknown")
+        self._mac: str = device_info.get("mac", "")
+        self._name: str = (
+            device_info.get("customName")
+            or device_info.get("deviceInfo", {}).get("displayName", "AirPursue PM10")
+        )
+        self._state: dict[str, Any] = {p.attr: p.default for p in PROP_DEFS}
         self._available = True
 
-    @property
-    def unique_id(self): return self._mac.replace(":", "").lower()
-    @property
-    def name(self): return self._name
-    @property
-    def model(self): return self._model
-    @property
-    def device_id(self): return self._did
-    @property
-    def mac(self): return self._mac
-    @property
-    def available(self): return self._available
-    @property
-    def is_on(self):
-        """Device is 'on' unless in sleep mode at speed 1 (our soft-off state)."""
-        if not self._power:
-            return False
-        # Sleep mode + speed 1 = our "off" state
-        if self._mode == MODE_SLEEP and self._fan_speed <= 1:
-            return False
-        return True
-    @property
-    def mode(self): return MODE_NAMES.get(self._mode, f"Unknown ({self._mode})")
-    @property
-    def mode_value(self): return self._mode
-    @property
-    def fan_speed(self): return self._fan_speed
-    @property
-    def fan_speed_percent(self): return max(0, self._fan_speed * 20) if self._fan_speed > 0 else 0
-    @property
-    def ionizer(self): return self._ionizer
-    @property
-    def pm25(self): return self._pm25
-    @property
-    def air_quality_level(self): return self._aq_level
-    @property
-    def filter_life(self): return self._filter_life
-    @property
-    def filter_days_total(self): return self._filter_days
-    @property
-    def filter_hours_used(self): return self._filter_used
-    @property
-    def led(self): return self._led
-    @property
-    def buzzer(self): return self._buzzer
-    @property
-    def child_lock(self): return self._child_lock
+    def __getattr__(self, name: str) -> Any:
+        """Fall-through to _state dict for registry-managed attributes."""
+        try:
+            return self._state[name]
+        except KeyError:
+            raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'") from None
 
-    def update(self) -> bool:
-        all_values = {}
-        for batch in POLL_BATCHES:
-            values = self._api.get_properties(self._did, batch, self._host)
+    # ── Identity ────────────────────────────────────────────────────────
+
+    @property
+    def unique_id(self) -> str:
+        return self._mac.replace(":", "").lower()
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def device_id(self) -> str:
+        return self._did
+
+    @property
+    def mac(self) -> str:
+        return self._mac
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    # ── Derived properties ──────────────────────────────────────────────
+
+    @property
+    def is_on(self) -> bool:
+        return self._state["power"] == 1
+
+    @property
+    def mode(self) -> str:
+        v = self._state["mode_value"]
+        return MODE_NAMES.get(v, f"Unknown ({v})")
+
+    @property
+    def fan_speed_percent(self) -> int:
+        return self._state["fan_speed"] * 10
+
+    @property
+    def auto_fan(self) -> bool:
+        return self._state["auto_fan_raw"] == 0
+
+    # ── Polling ─────────────────────────────────────────────────────────
+
+    async def update(self) -> bool:
+        all_values: dict[tuple[int, int], Any] = {}
+        for batch in _POLL_BATCHES:
+            values = await self._api.get_properties(self._did, batch, self._host)
             if values:
                 all_values.update(values)
         if not all_values:
             self._available = False
             return False
         self._available = True
-        self._power = all_values.get((2, 1), 0) == 1
-        self._mode = all_values.get((2, 3), 0)
-        self._fan_speed = all_values.get((2, 4), 0)
-        self._fan_pct = all_values.get((2, 5), 0)
-        ionizer_val = all_values.get((2, 6), 0)
-        self._ionizer = ionizer_val == 1
-        self._aq_level = all_values.get((3, 4), 0)
-        self._pm25 = all_values.get((3, 5), 0)
-        self._filter_life = all_values.get((4, 1), 0)
-        self._filter_days = all_values.get((4, 2), 365)
-        self._filter_used = all_values.get((4, 3), 0)
-        self._led = bool(all_values.get((6, 5), 0))
-        self._buzzer = bool(all_values.get((6, 6), 0))
-        self._child_lock = bool(all_values.get((6, 7), 0))
-        self._light_mode = all_values.get((6, 8), 0)
+        for p in PROP_DEFS:
+            raw = all_values.get((p.siid, p.piid), p.default)
+            if raw is None:
+                raw = p.default
+            self._state[p.attr] = p.coerce(raw) if p.coerce else raw
         return True
 
-    def toggle_power(self) -> bool:
-        return self._api.call_action(self._did, ACTION_TOGGLE_POWER["siid"], ACTION_TOGGLE_POWER["aiid"], host=self._host)
+    # ── Commands ────────────────────────────────────────────────────────
 
-    def turn_on(self) -> bool:
-        """Turn on: restore to Auto mode (or previous mode)."""
-        # If in standby (power=2), toggle won't work. If in sleep "off", just set mode.
-        if self._power:
-            # Device is on but in "sleep off" state - switch to Auto
-            return self.set_mode(MODE_AUTO)
-        else:
-            # Try toggle first, then set Auto
-            self.toggle_power()
-            return self.set_mode(MODE_AUTO)
+    async def toggle_power(self) -> bool:
+        return await self._api.call_action(self._did, *ACTION_TOGGLE_POWER, host=self._host)
 
-    def turn_off(self) -> bool:
-        """Turn off: switch to Sleep mode speed 1 (keeps device cloud-connected)."""
-        # Don't actually power off - device can't be woken remotely
-        self.set_mode(MODE_SLEEP)
-        return self.set_fan_speed(1)
+    async def turn_on(self, mode: int = MODE_AUTO) -> bool:
+        if not self.is_on:
+            await self.toggle_power()
+        return await self.set_mode(mode)
 
-    def set_mode(self, mode: int) -> bool:
-        return self._api.set_property(self._did, 2, 3, mode, self._host)
+    async def turn_off(self) -> bool:
+        return await self.toggle_power() if self.is_on else True
 
-    def set_fan_speed(self, speed: int) -> bool:
-        return self._api.set_property(self._did, 2, 4, max(1, min(5, speed)), self._host)
+    async def set_mode(self, mode: int) -> bool:
+        return await self._api.set_property(self._did, 2, 3, mode, self._host)
 
-    def set_fan_speed_percent(self, percent: int) -> bool:
-        if percent <= 0:
-            return self.turn_off()
-        return self.set_fan_speed(max(1, min(5, round(percent / 20))))
+    async def set_fan_speed(self, speed: int) -> bool:
+        return await self._api.set_property(self._did, 2, 4, max(1, min(10, speed)), self._host)
 
-    def set_ionizer(self, enabled: bool) -> bool:
-        return self._api.set_property(self._did, 2, 6, 1 if enabled else 0, self._host)
+    async def set_swivel(self, angle: int) -> bool:
+        if angle not in SWIVEL_OPTIONS:
+            return False
+        return await self._api.set_property(self._did, 2, 7, angle, self._host)
 
-    def set_led(self, enabled: bool) -> bool:
-        return self._api.set_property(self._did, 6, 5, 1 if enabled else 0, self._host)
+    async def set_continuous_monitoring(self, enabled: bool) -> bool:
+        return await self._api.set_property(self._did, 2, 10, int(enabled), self._host)
 
-    def set_buzzer(self, enabled: bool) -> bool:
-        return self._api.set_property(self._did, 6, 6, 1 if enabled else 0, self._host)
+    async def set_human_sensing(self, enabled: bool) -> bool:
+        return await self._api.set_property(self._did, 6, 5, int(enabled), self._host)
 
-    def set_child_lock(self, enabled: bool) -> bool:
-        return self._api.set_property(self._did, 6, 7, 1 if enabled else 0, self._host)
+    async def set_follow_mode(self, enabled: bool) -> bool:
+        return await self._api.set_property(self._did, 6, 6, int(enabled), self._host)
 
-    def reset_filter(self) -> bool:
-        return self._api.call_action(self._did, 4, 1, host=self._host)
+    async def set_voice_assistant(self, enabled: bool) -> bool:
+        return await self._api.set_property(self._did, 6, 7, int(enabled), self._host)
+
+    async def set_temp_unit(self, unit: int) -> bool:
+        return await self._api.set_property(self._did, 6, 4, unit, self._host)
+
+    async def set_timer(self, hours: int) -> bool:
+        return await self._api.set_property(self._did, 6, 8, hours, self._host)
+
+    async def reset_hepa_filter(self) -> bool:
+        return await self._api.call_action(self._did, 4, 1, host=self._host)
+
+    async def reset_carbon_filter(self) -> bool:
+        return await self._api.call_action(self._did, 5, 1, host=self._host)

@@ -1,0 +1,104 @@
+python3 tools/monitor_pm10.py -u $YOUR_EMAIL -p $YOUR_PASSWORD
+python3 tools/monitor_pm10.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --interval 1 -s 3
+
+python3 tools/set_property.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --siid 2 --piid 4 --value 7 // fan
+python3 tools/set_property.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --siid 2 --piid 7 --value 45 // swivel
+python3 tools/set_property.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --siid 6 --piid 6 --value 0 // follow
+
+
+----------------------------------------------------------------------
+  ALL DISCOVERED PROPERTIES
+----------------------------------------------------------------------
+  siid  piid                 Value      Type  P10 Mapping
+  ----  ----                  ----      ----  ----------
+     1     4                  1067       str  ** UNKNOWN **
+     1     5    000000000000000000       str  ** UNKNOWN **
+
+// app
+
+     // 2     2                     0       int  ** UNKNOWN **
+     // 2     5                    -1       int  Fan Percent (read-only)
+     // 2     6                    -1       int  Ionizer (-1=auto, 0=off, 1=on)
+
+     2     1                     1       int  Power (1=on, 2=standby) ✓
+     2     3                     0       int  ** Mode (0=Auto/AI, 2=Comfort, 3=Custom, 4=Pet) 1=reset?
+     2     4                     1       int  ** Fan Speed (1-10)
+     2     7                   180       int  ** Swivel (0/45/90/180 deg)
+
+     // this changes from 0<->9 on startup, 0 on, also changes in & out of auto fan, auto fan??
+     2     8                     0       int  ** Auto fan (0=auto, 9=manual), triggered by Auto/AI (read-only)
+     2    10                     0       int  ** Continious Monitoring (0=off, 1=on)
+
+// sensor
+
+     3     2                     0       int  ** Humidity % [0..41] 
+     3     3                     0       int  ** Temperature °C [0..28]                           
+     3     4                     1       int  Air Quality Level ✓ [1..4]
+     3     5                     0       int  ** PM2.5 µg/m³ [1..615]
+     3     6                     0       int  ** PM10 µg/m³ [0..1825]
+     3     7                     0       int  ** HCHO ? [0..26]
+     3     8                    27       int  ** TVOC µg/m³ [32..172]
+     3     9                    27       int  ** TVOC (duplicate) [32..172]
+     3    10                     0       int  ** PM1 µg/m³ ? [0..368]
+     3    11                   588       int  ** UNKOWN? [821..1883]
+     3    12                     2       int  ** AQ % ? ** [2..99]
+     3    13               TVOC-27       str  ** UNKOWN tracks w/ app update? {110 distinct}
+
+// HEPA
+
+     4     1                   100       int  HEPA Filter Life % ✓
+     4     2                   720       int  HEPA Filter Days Total ✓
+     4     3                     0       int  HEPA Filter Hours Used ??
+
+// Carbon
+
+     5     1                   100       int  ** Carbon Filter Life % ??
+     5     2                   360       int  ** Carbon Filter Days Total ??
+     5     3                     0       int  ** Carbon Filter Hours Used ??
+
+// ??
+  siid= 6 piid= 1 = 'America/New_York' \\ Time Zone
+  siid= 6 piid= 2 = '00:00-0-00:00-0-10000000'
+  siid= 6 piid= 3 = 'New/York,New/York' \\ Device Location
+
+     6     4                     1       int  ** Temperature Unit (0=C, 1=F)
+     6     5                     0       int  ** Human Sensing Settings (0=Off, 1=On)
+     6     6                     0       int  ** Follow Mode (0=Off, 1=Follow)
+     6     7                     0       int  ** Voice Assistant (0=Off, 1=On)
+     6     8                     6       int  ** Timer HRS
+
+
+// Voice On vs. Off vs. On vs. Off ??
+
+  siid= 6 piid= 9:  '1-1776095721,0-1776095748,' → '1-1776095721,0-1776095748,1-1776096445,'  {'1-1776095721,0-1776095748,', '1-1776095721,0-1776095748,1-1776096445,'}
+
+  siid= 6 piid= 9:  '1-1776095721,0-1776095748,1-1776096445,' → '1-1776095721,0-1776095748,1-1776096445,0-1776096451,'  {'1-1776095721,0-1776095748,', '1-1776095721,0-1776095748,1-1776096445,', '1-1776095721,0-1776095748,1-1776096445,0-1776096451,'}
+
+  siid= 6 piid= 9:  '1-1776095721,0-1776095748,1-1776096445,0-1776096451,' → '1-1776095721,0-1776095748,1-1776096445,0-1776096451,1-1776096510,'  {'1-1776095721,0-1776095748,', '1-1776095721,0-1776095748,1-1776096445,', '1-1776095721,0-1776095748,1-1776096445,0-1776096451,', '1-1776095721,0-1776095748,1-1776096445,0-1776096451,1-1776096510,'}
+
+  siid= 6 piid= 9:  '1-1776095721,0-1776095748,1-1776096445,0-1776096451,1-1776096510,' → '1-1776095721,0-1776095748,1-1776096445,0-1776096451,1-1776096510,0-1776096538,'  {'1-1776095721,0-1776095748,', '1-1776095721,0-1776095748,1-1776096445,', '1-1776095721,0-1776095748,1-1776096445,0-1776096451,', '1-1776095721,0-1776095748,1-1776096445,0-1776096451,1-1776096510,', '1-1776095721,0-1776095748,1-1776096445,0-1776096451,1-1776096510,0-1776096538,'}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

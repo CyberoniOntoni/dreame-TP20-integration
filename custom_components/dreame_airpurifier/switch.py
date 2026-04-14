@@ -1,65 +1,59 @@
-"""Switch platform for Dreame Air Purifier."""
-import logging
-from typing import Any
+"""Switch platform for AirPursue PM10."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .api import DreameAirPurifier
-from .const import DOMAIN
 
-_LOGGER = logging.getLogger(__name__)
+from .const import DOMAIN
+from .entity import DreameEntity
+
+
+@dataclass(frozen=True, slots=True)
+class SwitchSpec:
+    key: str
+    attr: str
+    setter: str
+    icon: str
+
+
+SWITCHES: tuple[SwitchSpec, ...] = (
+    SwitchSpec("continuous_monitoring", "continuous_monitoring", "set_continuous_monitoring", "mdi:eye"),
+    SwitchSpec("human_sensing", "human_sensing", "set_human_sensing", "mdi:motion-sensor"),
+    SwitchSpec("follow_mode", "follow_mode", "set_follow_mode", "mdi:rotate-3d-variant"),
+    SwitchSpec("voice_assistant", "voice_assistant", "set_voice_assistant", "mdi:microphone"),
+)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
-    entities = []
-    for p in data["purifiers"]:
-        entities.extend([DreameIonizerSwitch(data["coordinator"], p), DreameLEDSwitch(data["coordinator"], p),
-                         DreameBuzzerSwitch(data["coordinator"], p), DreameChildLockSwitch(data["coordinator"], p)])
-    async_add_entities(entities)
+    async_add_entities(DreameSwitch(data["coordinator"], p, spec) for p in data["purifiers"] for spec in SWITCHES)
 
-class DreameBaseSwitch(CoordinatorEntity, SwitchEntity):
-    _attr_has_entity_name = True
-    def __init__(self, coordinator, purifier: DreameAirPurifier, key: str, name: str):
-        super().__init__(coordinator)
-        self._purifier = purifier
-        self._attr_unique_id = f"{purifier.unique_id}_{key}"
-        self._attr_name = name
-    @property
-    def device_info(self):
-        return {"identifiers": {(DOMAIN, self._purifier.unique_id)}, "name": self._purifier.name, "manufacturer": "Dreame", "model": self._purifier.model}
-    @property
-    def available(self): return self._purifier.available
 
-class DreameIonizerSwitch(DreameBaseSwitch):
-    _attr_icon = "mdi:creation"
-    def __init__(self, c, p): super().__init__(c, p, "ionizer", "Ionizer")
-    @property
-    def is_on(self): return self._purifier.ionizer
-    async def async_turn_on(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_ionizer, True); await self.coordinator.async_request_refresh()
-    async def async_turn_off(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_ionizer, False); await self.coordinator.async_request_refresh()
+class DreameSwitch(DreameEntity, SwitchEntity):
+    _attr_entity_category = EntityCategory.CONFIG
 
-class DreameLEDSwitch(DreameBaseSwitch):
-    _attr_icon = "mdi:led-on"
-    def __init__(self, c, p): super().__init__(c, p, "led", "LED Indicator")
-    @property
-    def is_on(self): return self._purifier.led
-    async def async_turn_on(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_led, True); await self.coordinator.async_request_refresh()
-    async def async_turn_off(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_led, False); await self.coordinator.async_request_refresh()
+    def __init__(self, coordinator, purifier, spec: SwitchSpec):
+        super().__init__(coordinator, purifier)
+        self._spec = spec
+        self._attr_unique_id = f"{purifier.unique_id}_{spec.key}"
+        self._attr_translation_key = spec.key
+        self._attr_icon = spec.icon
 
-class DreameBuzzerSwitch(DreameBaseSwitch):
-    _attr_icon = "mdi:volume-high"
-    def __init__(self, c, p): super().__init__(c, p, "buzzer", "Buzzer")
     @property
-    def is_on(self): return self._purifier.buzzer
-    async def async_turn_on(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_buzzer, True); await self.coordinator.async_request_refresh()
-    async def async_turn_off(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_buzzer, False); await self.coordinator.async_request_refresh()
+    def is_on(self):
+        return getattr(self._purifier, self._spec.attr)
 
-class DreameChildLockSwitch(DreameBaseSwitch):
-    _attr_icon = "mdi:lock"
-    def __init__(self, c, p): super().__init__(c, p, "child_lock", "Child Lock")
-    @property
-    def is_on(self): return self._purifier.child_lock
-    async def async_turn_on(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_child_lock, True); await self.coordinator.async_request_refresh()
-    async def async_turn_off(self, **kwargs): await self.hass.async_add_executor_job(self._purifier.set_child_lock, False); await self.coordinator.async_request_refresh()
+    async def _set(self, value: bool) -> None:
+        await getattr(self._purifier, self._spec.setter)(value)
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._set(False)

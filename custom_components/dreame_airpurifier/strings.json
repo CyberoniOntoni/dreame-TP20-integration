@@ -2,8 +2,17 @@
   "config": {
     "step": {
       "user": {
-        "title": "Dreame Air Purifier",
+        "title": "AirPursue PM10 Air Purifier",
         "description": "Enter your Dreamehome app credentials.",
+        "data": {
+          "username": "Email or Phone",
+          "password": "Password",
+          "country": "Server Region"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate AirPursue PM10",
+        "description": "Your credentials have expired. Please re-enter them.",
         "data": {
           "username": "Email or Phone",
           "password": "Password",
@@ -14,6 +23,41 @@
     "error": {
       "invalid_auth": "Invalid credentials",
       "no_devices": "No air purifiers found on this account"
+    },
+    "abort": {
+      "reauth_successful": "Re-authentication successful"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "humidity": { "name": "Humidity" },
+      "temperature": { "name": "Temperature" },
+      "pm25": { "name": "PM2.5" },
+      "pm10": { "name": "PM10" },
+      "pm1": { "name": "PM1" },
+      "hcho": { "name": "Formaldehyde" },
+      "tvoc": { "name": "TVOC" },
+      "air_quality": { "name": "Air Quality Level" },
+      "aq_percent": { "name": "Air Quality" },
+      "hepa_life": { "name": "HEPA Filter Life" },
+      "hepa_used": { "name": "HEPA Filter Hours" },
+      "hepa_days": { "name": "HEPA Filter Days Total" },
+      "carbon_life": { "name": "Carbon Filter Life" },
+      "carbon_used": { "name": "Carbon Filter Hours" },
+      "carbon_days": { "name": "Carbon Filter Days Total" }
+    },
+    "switch": {
+      "continuous_monitoring": { "name": "Continuous Monitoring" },
+      "human_sensing": { "name": "Human Sensing" },
+      "follow_mode": { "name": "Follow Mode" },
+      "voice_assistant": { "name": "Voice Assistant" }
+    },
+    "select": {
+      "swivel": { "name": "Swivel Angle" },
+      "temp_unit": { "name": "Temperature Unit" }
+    },
+    "number": {
+      "timer": { "name": "Timer" }
     }
   }
 }
