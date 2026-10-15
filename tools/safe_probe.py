@@ -19,6 +19,9 @@ Usage:
     # Resume after a stop, from a given property (siid.piid)
     python3 tools/safe_probe.py -u EMAIL -p 'PASSWORD' --country sg --start 3.5
 
+    # Leave out properties known to crash the device
+    python3 tools/safe_probe.py -u EMAIL -p 'PASSWORD' --country sg --skip 3.10
+
     # Step 2 (only if every single read was fine): batched reads like the integration
     python3 tools/safe_probe.py -u EMAIL -p 'PASSWORD' --country sg --batch 5
 
@@ -88,19 +91,25 @@ def main():
     parser.add_argument("--confirm", action="store_true", help="Wait for Enter after each read")
     parser.add_argument("--start", default=None, help="Resume from this property, e.g. 3.5")
     parser.add_argument("--batch", type=int, default=1, help="Properties per request (default 1)")
+    parser.add_argument("--skip", default="", help="Comma-separated properties to leave out, e.g. 3.10,6.2")
     args = parser.parse_args()
+
+    def parse_key(text):
+        try:
+            s, p = (int(x) for x in text.strip().split("."))
+            return (s, p)
+        except ValueError:
+            parser.error(f"{text!r} should look like 3.10")
 
     known = load_known_props()
     if not known:
         print(f"{RED}❌ Could not load the integration's property list{RESET}")
         sys.exit(1)
-    keys = sorted(known)
+    skip = {parse_key(t) for t in args.skip.split(",") if t.strip()}
+    keys = [k for k in sorted(known) if k not in skip]
     if args.start:
-        try:
-            s, p = (int(x) for x in args.start.split("."))
-        except ValueError:
-            parser.error("--start must look like 3.5")
-        keys = [k for k in keys if k >= (s, p)]
+        start = parse_key(args.start)
+        keys = [k for k in keys if k >= start]
 
     client = DreameClient(args.username, args.password, args.country)
     if not client.login():
@@ -128,7 +137,9 @@ def main():
         print(f"{CYAN}{ts()}  reading {label}{RESET}")
         res, err = read_props(client, did, host, batch)
         if err:
-            print(f"  {YELLOW}{err}{RESET}")
+            # The read itself got no answer: the device most likely crashed on it.
+            # Stop here even if it comes back before the next health check.
+            print(f"  {RED}{err}{RESET}")
         for k in batch:
             code, value = res.get(k, (None, None))
             results[k] = (code, value)
@@ -142,14 +153,18 @@ def main():
         else:
             time.sleep(args.delay)
 
-        if not wait_for_health(client, did, host):
-            nxt = batch[0]
-            print(f"\n{RED}{BOLD}⛔ Device stopped answering after reading: {label}{RESET}")
-            print(f"{RED}   Likely trigger. Wait for it to come back, then resume after it with:{RESET}")
+        healthy = wait_for_health(client, did, host)
+        if err or not healthy:
+            what = "didn't answer this read" if err else "stopped answering after"
+            back = " (it has answered again since)" if healthy else ""
+            print(f"\n{RED}{BOLD}⛔ Device {what}: {label}{back}{RESET}")
+            print(f"{RED}   Likely trigger. Once the device is back, skip it and carry on with:{RESET}")
             later = [k for k in keys if k > batch[-1]]
+            skip_arg = ",".join(f"{s}.{p}" for s, p in sorted(skip | set(batch)))
             if later:
-                print(f"   python {sys.argv[0]} -u EMAIL -p 'PASSWORD' --country {args.country} --start {later[0][0]}.{later[0][1]}")
-            print(f"   (first property in the batch that stopped it: {nxt[0]}.{nxt[1]})")
+                print(f"   python {sys.argv[0]} -u EMAIL -p 'PASSWORD' --country {args.country} --skip {skip_arg} --start {later[0][0]}.{later[0][1]}")
+            if len(batch) > 1:
+                print(f"   (that request had {len(batch)} properties; re-run with --batch 1 to find which one)")
             break
     else:
         print(f"\n{GREEN}{BOLD}✅ Device kept answering through every read.{RESET}")
