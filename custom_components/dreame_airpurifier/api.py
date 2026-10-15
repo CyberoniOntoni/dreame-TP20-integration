@@ -81,7 +81,8 @@ TP20_PROP_DEFS: tuple[PropDef, ...] = (
     PropDef("fan_level",            2, 10, 0),   # mirrors fan_speed; read-only
     PropDef("air_quality_level",    3,  4, 0),
     PropDef("pm25",                 3,  5, 0),
-    PropDef("aq_percent",           3, 12, 0, lambda v: max(0, min(100, 100 - int(v)))),
+    # 3.12 is left out: it rises with pollution (~70-84, 0 when off), but the app
+    # doesn't show it, so there's nothing to check a "%" reading against.
     PropDef("hepa_life",            4,  1, 0),
     PropDef("temp_unit",            6,  4, 0),
     PropDef("timer",                6,  8, 0),

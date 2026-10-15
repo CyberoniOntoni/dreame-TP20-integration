@@ -37,7 +37,16 @@
       "pm1": { "name": "PM1" },
       "hcho": { "name": "Formaldehyde" },
       "tvoc": { "name": "TVOC" },
-      "air_quality": { "name": "Air Quality Level" },
+      "air_quality": {
+        "name": "Air Quality Level",
+        "state": {
+          "excellent": "Excellent",
+          "good": "Good",
+          "moderate": "Moderate",
+          "poor": "Poor",
+          "bad": "Bad"
+        }
+      },
       "aq_percent": { "name": "Air Quality" },
       "fan_level": { "name": "Fan Level" },
       "hepa_life": { "name": "HEPA Filter Life" },

@@ -30,6 +30,9 @@ class ModelProfile:
     manual_mode: int        # the mode in which fan speed can be set
     speed_count: int        # fan speeds run 1..speed_count
     timer_max: int          # hours
+    # Air quality level value -> state key, for models whose app names the levels.
+    # Keys are translated in strings.json (entity.sensor.air_quality.state).
+    aq_levels: dict[int, str] | None = None
 
     @property
     def mode_by_name(self) -> dict[str, int]:
@@ -44,6 +47,8 @@ PROFILES: dict[str, ModelProfile] = {
     # 12 h is the longest timer the Dreame app offers (1 h and 2 h were written).
     "dreame.airp.u2630": ModelProfile(
         modes={0: "AI Purify", 2: "Sleep", 3: "Custom"}, manual_mode=3, speed_count=3, timer_max=12,
+        # The app shows five levels. 3.4 was seen at 1-4, rising with PM2.5; order assumed ascending.
+        aq_levels={1: "excellent", 2: "good", 3: "moderate", 4: "poor", 5: "bad"},
     ),
 }
 

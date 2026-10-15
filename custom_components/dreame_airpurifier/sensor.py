@@ -72,10 +72,18 @@ class DreameSensor(DreameEntity, SensorEntity):
             self._attr_suggested_display_precision = spec.precision
         if spec.category is not None:
             self._attr_entity_category = spec.category
+        # Named levels (e.g. the TP20's Excellent..Bad) instead of a bare number
+        self._levels = purifier.profile.aq_levels if spec.attr == "air_quality_level" else None
+        if self._levels:
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_state_class = None
+            self._attr_options = list(self._levels.values())
 
     @property
     def native_value(self):
         v = getattr(self._purifier, self._spec.attr)
         if v is None:
             return None
+        if self._levels:
+            return self._levels.get(v)
         return v * self._spec.scale if self._spec.scale != 1 else v
