@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 import aiohttp
 
-from .const import MODE_AUTO, MODE_NAMES, SWIVEL_OPTIONS
+from .const import MODE_AUTO, MODE_NAMES, SWIVEL_OPTIONS, UNSAFE_PROPS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -71,10 +71,10 @@ PROP_DEFS: tuple[PropDef, ...] = (
 
 # Pre-compute poll batches (≤15 props per request)
 _BATCH_SIZE = 15
-_POLL_BATCHES: tuple[tuple[PropDef, ...], ...] = tuple(
-    tuple(PROP_DEFS[i : i + _BATCH_SIZE])
-    for i in range(0, len(PROP_DEFS), _BATCH_SIZE)
-)
+
+
+def _batches(defs: tuple[PropDef, ...]) -> tuple[tuple[PropDef, ...], ...]:
+    return tuple(defs[i : i + _BATCH_SIZE] for i in range(0, len(defs), _BATCH_SIZE))
 
 ACTION_TOGGLE_POWER = (2, 3)  # (siid, aiid)
 
@@ -263,7 +263,7 @@ class DreameAirPurifier:
     Derived properties (is_on, mode, fan_speed_percent, auto_fan) are explicit.
     """
 
-    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available", "_supported", "_detected", "_partial", "_raw")
+    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available", "_supported", "_detected", "_partial", "_raw", "_poll_defs", "_skipped")
 
     def __init__(self, api: DreameCloudAPI, device_info: dict):
         self._api = api
@@ -287,6 +287,11 @@ class DreameAirPurifier:
         self._partial = False
         # Last raw value seen per (siid, piid), for diagnostics.
         self._raw: dict[tuple[int, int], Any] = {}
+        # Properties to poll. Starts as everything except reads known to crash
+        # this model; narrowed to what the device supports once detected.
+        unsafe = UNSAFE_PROPS.get(self._model, frozenset())
+        self._poll_defs: tuple[PropDef, ...] = tuple(p for p in PROP_DEFS if (p.siid, p.piid) not in unsafe)
+        self._skipped: list[str] = sorted(p.attr for p in PROP_DEFS if (p.siid, p.piid) in unsafe)
 
     def __getattr__(self, name: str) -> Any:
         """Fall-through to _state dict for registry-managed attributes."""
@@ -358,6 +363,11 @@ class DreameAirPurifier:
         return sorted(p.attr for p in PROP_DEFS if p.attr not in self._supported)
 
     @property
+    def skipped_attrs(self) -> list[str]:
+        """Attributes never read on this model because reading them is unsafe."""
+        return list(self._skipped)
+
+    @property
     def raw_properties(self) -> dict[str, Any]:
         """Last raw value per property, keyed "siid.piid"."""
         return {f"{s}.{pi}": v for (s, pi), v in sorted(self._raw.items())}
@@ -367,7 +377,7 @@ class DreameAirPurifier:
     async def update(self) -> bool:
         all_values: dict[tuple[int, int], Any] = {}
         failed = False
-        for batch in _POLL_BATCHES:
+        for batch in _batches(self._poll_defs):
             values = await self._api.get_properties(self._did, batch, self._host)
             if values is None:
                 failed = True
@@ -396,9 +406,11 @@ class DreameAirPurifier:
             # else: supported but missing this poll (e.g. a batch failed) -> keep last value
         if not self._detected:
             self._detected = True
+            # From now on only ask for what the device has: fewer, smaller requests.
+            self._poll_defs = tuple(p for p in self._poll_defs if p.attr in self._supported)
             _LOGGER.info(
-                "%s (%s) reported properties: %s; not reported: %s",
-                self._name, self._model, self.raw_properties, self.unsupported_attrs,
+                "%s (%s) reported properties: %s; not reported: %s; skipped as unsafe: %s",
+                self._name, self._model, self.raw_properties, self.unsupported_attrs, self._skipped,
             )
         return True
 

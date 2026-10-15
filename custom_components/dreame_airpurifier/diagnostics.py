@@ -23,6 +23,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
                 "available": p.available,
                 "supported": p.supported_attrs,
                 "unsupported": p.unsupported_attrs,
+                "skipped_as_unsafe": p.skipped_attrs,
                 "raw_properties": p.raw_properties,
             }
             for p in data["purifiers"]
