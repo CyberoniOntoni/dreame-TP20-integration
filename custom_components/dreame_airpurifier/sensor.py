@@ -53,7 +53,7 @@ SENSORS: tuple[SensorSpec, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(DreameSensor(data["coordinator"], p, spec) for p in data["purifiers"] for spec in SENSORS)
+    async_add_entities(DreameSensor(data["coordinator"], p, spec) for p in data["purifiers"] for spec in SENSORS if p.supports(spec.attr))
 
 
 class DreameSensor(DreameEntity, SensorEntity):

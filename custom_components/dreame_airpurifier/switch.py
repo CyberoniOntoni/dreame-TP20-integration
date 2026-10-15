@@ -31,7 +31,7 @@ SWITCHES: tuple[SwitchSpec, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(DreameSwitch(data["coordinator"], p, spec) for p in data["purifiers"] for spec in SWITCHES)
+    async_add_entities(DreameSwitch(data["coordinator"], p, spec) for p in data["purifiers"] for spec in SWITCHES if p.supports(spec.attr))
 
 
 class DreameSwitch(DreameEntity, SwitchEntity):

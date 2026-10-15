@@ -260,7 +260,7 @@ class DreameAirPurifier:
     Derived properties (is_on, mode, fan_speed_percent, auto_fan) are explicit.
     """
 
-    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available")
+    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available", "_supported", "_logged_props")
 
     def __init__(self, api: DreameCloudAPI, device_info: dict):
         self._api = api
@@ -270,10 +270,14 @@ class DreameAirPurifier:
         self._mac: str = device_info.get("mac", "")
         self._name: str = (
             device_info.get("customName")
-            or device_info.get("deviceInfo", {}).get("displayName", "AirPursue PM10")
+            or device_info.get("deviceInfo", {}).get("displayName", "Dreame Air Purifier")
         )
         self._state: dict[str, Any] = {p.attr: p.default for p in PROP_DEFS}
         self._available = True
+        # Attributes the device has actually reported (code 0, non-null value).
+        # Used to skip creating entities for properties a model doesn't have.
+        self._supported: set[str] = set()
+        self._logged_props = False
 
     def __getattr__(self, name: str) -> Any:
         """Fall-through to _state dict for registry-managed attributes."""
@@ -327,6 +331,10 @@ class DreameAirPurifier:
     def auto_fan(self) -> bool:
         return self._state["auto_fan_raw"] == 0
 
+    def supports(self, attr: str) -> bool:
+        """True if the device has reported a value for this registry attribute."""
+        return attr in self._supported
+
     # ── Polling ─────────────────────────────────────────────────────────
 
     async def update(self) -> bool:
@@ -340,10 +348,20 @@ class DreameAirPurifier:
             return False
         self._available = True
         for p in PROP_DEFS:
-            raw = all_values.get((p.siid, p.piid), p.default)
-            if raw is None:
+            raw = all_values.get((p.siid, p.piid))
+            if raw is not None:
+                self._supported.add(p.attr)
+            else:
                 raw = p.default
             self._state[p.attr] = p.coerce(raw) if p.coerce else raw
+        if not self._logged_props:
+            self._logged_props = True
+            _LOGGER.info(
+                "%s (%s) reported properties: %s; not reported: %s",
+                self._name, self._model,
+                {f"{s}.{pi}": v for (s, pi), v in sorted(all_values.items())},
+                sorted(p.attr for p in PROP_DEFS if p.attr not in self._supported),
+            )
         return True
 
     # ── Commands ────────────────────────────────────────────────────────

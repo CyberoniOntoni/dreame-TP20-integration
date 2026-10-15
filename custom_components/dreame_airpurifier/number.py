@@ -14,7 +14,7 @@ from .entity import DreameEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(DreameTimer(data["coordinator"], p) for p in data["purifiers"])
+    async_add_entities(DreameTimer(data["coordinator"], p) for p in data["purifiers"] if p.supports("timer"))
 
 
 class DreameTimer(DreameEntity, NumberEntity):
