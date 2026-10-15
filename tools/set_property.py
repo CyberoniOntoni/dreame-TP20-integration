@@ -222,11 +222,13 @@ Examples:
 
     # Reading (which a set also does first) some properties crashes some models.
     if not args.action and (args.siid, args.piid) in unsafe_for(dev.get("model", "")):
-        print(f"{RED}❌ {args.siid}.{args.piid} is known to crash {dev.get('model')} when read "
-              f"(UNSAFE_PROPS in const.py). Not sending anything.{RESET}")
         if not args.force:
+            print(f"{RED}❌ {args.siid}.{args.piid} is known to crash {dev.get('model')} when read "
+                  f"(UNSAFE_PROPS in const.py). Not sending anything.{RESET}")
             print("   Re-run with --force if you really mean it.")
             sys.exit(1)
+        print(f"{YELLOW}⚠️  --force: sending {args.siid}.{args.piid} although it's known to crash "
+              f"{dev.get('model')}. Expect it to restart and come back switched off.{RESET}")
 
     if args.action:
         # ── Call Action ──────────────────────────────────────────────

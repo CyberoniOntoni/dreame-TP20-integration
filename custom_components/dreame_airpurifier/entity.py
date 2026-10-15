@@ -39,13 +39,16 @@ class DreameEntity(CoordinatorEntity):
     async def _write(self, *steps: Awaitable[bool], action: str) -> None:
         """Run commands in order, refresh, and show an error in HA if one wasn't
         confirmed (stopping there, so e.g. a speed isn't sent after a failed mode change)."""
-        ok = True
-        for i, step in enumerate(steps):
-            if not await step:
-                ok = False
-                for rest in steps[i + 1:]:
-                    rest.close()  # never sent
-                break
+        ok, done = True, 0
+        try:
+            for step in steps:
+                done += 1
+                if not await step:
+                    ok = False
+                    break
+        finally:
+            for rest in steps[done:]:
+                rest.close()  # never sent (after a failure or an exception)
         await self.coordinator.async_request_refresh()
         if not ok:
-            raise HomeAssistantError(f"{self._purifier.name}: couldn't {action}. The purifier didn't confirm the change.")
+            raise HomeAssistantError(f"{self._purifier.name}: couldn't {action}. The change wasn't confirmed; see the log for details.")
