@@ -46,6 +46,7 @@ SENSORS: tuple[SensorSpec, ...] = (
     SensorSpec("hepa_life", "hepa_life", state_class=_M, unit=PERCENTAGE, icon="mdi:air-filter", category=_D),
     SensorSpec("hepa_used", "hepa_hours_used", state_class=_T, unit=UnitOfTime.HOURS, icon="mdi:clock-outline", category=_D),
     SensorSpec("hepa_days", "hepa_days_total", unit=UnitOfTime.DAYS, icon="mdi:calendar-clock", category=_D),
+    SensorSpec("hepa_days_left", "hepa_days_left", state_class=_M, unit=UnitOfTime.DAYS, icon="mdi:calendar-clock", category=_D),
     SensorSpec("carbon_life", "carbon_life", state_class=_M, unit=PERCENTAGE, icon="mdi:air-filter", category=_D),
     SensorSpec("carbon_used", "carbon_hours_used", state_class=_T, unit=UnitOfTime.HOURS, icon="mdi:clock-outline", category=_D),
     SensorSpec("carbon_days", "carbon_days_total", unit=UnitOfTime.DAYS, icon="mdi:calendar-clock", category=_D),

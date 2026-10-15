@@ -84,6 +84,7 @@ TP20_PROP_DEFS: tuple[PropDef, ...] = (
     # 3.12 is left out: it rises with pollution (~70-84, 0 when off), but the app
     # doesn't show it, so there's nothing to check a "%" reading against.
     PropDef("hepa_life",            4,  1, 0),
+    PropDef("hepa_days_left",       4,  2, 0),   # days of filter life left (filters last 5 years)
     PropDef("temp_unit",            6,  4, 0),
     PropDef("timer",                6,  8, 0),
     PropDef("child_lock",           6, 10, False, bool),
