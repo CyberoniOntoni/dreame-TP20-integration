@@ -1,4 +1,4 @@
-"""Number platform for AirPursue PM10."""
+"""Number platform for Dreame Air Purifier."""
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode

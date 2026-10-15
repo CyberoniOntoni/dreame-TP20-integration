@@ -1,4 +1,4 @@
-"""Fan platform for AirPursue PM10."""
+"""Fan platform for Dreame Air Purifier."""
 from __future__ import annotations
 
 from typing import Any

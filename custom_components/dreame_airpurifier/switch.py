@@ -1,4 +1,4 @@
-"""Switch platform for AirPursue PM10."""
+"""Switch platform for Dreame Air Purifier."""
 from __future__ import annotations
 
 from dataclasses import dataclass

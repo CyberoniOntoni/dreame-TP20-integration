@@ -20,3 +20,17 @@ There is some issue w/ the Dreame API being IPv4 only & conflicting w/ tail scal
 I really just made this so I could use the climate sensors for HA automations. I was hoping it would expose the builtin MMWAVE radar used for the Follow mode. Good news privacy enthusiasts, that is all handled locally. Bad news HA enthuasists, that is all handled locally 
 
 There is also slightly weird behavior when you change it to follow mode that the degree of rotation freedom stays the same. Thats how the API exposes it when you set it to follow in the App too. I didn't want to mess around with that. Maybe mess around with that
+
+## Other models (e.g. TP20)
+
+Entities are only created for properties your purifier actually reports, so features your model doesn't have (swivel, follow mode, etc.) won't show up.
+
+To see what your device reports, go to Settings → Devices & services → Dreame Air Purifier → ⋮ → Download diagnostics. The file lists every raw property (`siid.piid`) and which known attributes are missing, without credentials, device IDs or MACs. The same list is logged once at startup at INFO level; to see it in the log, add:
+
+```yaml
+logger:
+  logs:
+    custom_components.dreame_airpurifier: info
+```
+
+For properties outside the known map, run `python3 tools/discover_pm10.py -u <email> -p <password> --country <region>`, which scans every siid/piid.
