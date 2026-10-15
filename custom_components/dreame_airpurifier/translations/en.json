@@ -52,6 +52,7 @@
       "hepa_life": { "name": "HEPA Filter Life" },
       "hepa_used": { "name": "HEPA Filter Hours" },
       "hepa_days": { "name": "HEPA Filter Days Total" },
+      "hepa_days_left": { "name": "HEPA Filter Days Left" },
       "carbon_life": { "name": "Carbon Filter Life" },
       "carbon_used": { "name": "Carbon Filter Hours" },
       "carbon_days": { "name": "Carbon Filter Days Total" }
