@@ -57,7 +57,9 @@ What you get depends on what your model reports. Features it doesn't have are no
    ```
    `tools/monitor_properties.py` watches values change live while you use the app, and `tools/set_property.py` writes a single property. `re.txt` has the PM10 map as a reference.
 
-   If polling makes your purifier misbehave (e.g. reboot), use `tools/safe_probe.py` first: it reads one property at a time, checks the device is still answering after each, and stops at the first one that causes trouble.
+   If polling makes your purifier misbehave (e.g. reboot), use `tools/safe_probe.py` first: it reads one property at a time, checks the device is still answering after each, and stops at the first one that causes trouble. With `--scan --siids 1-8 --piids 1-20` it does the same over a whole range, to find properties the integration doesn't know yet.
+
+   Properties found to crash a model go in `UNSAFE_PROPS` in `const.py`. The integration never reads them, and all the tools skip them. On such models `discover_properties.py` refuses its batched scan unless you pass `--force`, and `monitor_properties.py` watches only known properties unless you pass `--full-scan`. The TP20 (`dreame.airp.u2630`) crashes, and comes back switched off, when 3.10 is read.
 4. Update `PROP_DEFS` in `custom_components/dreame_airpurifier/api.py`.
 
 The same property list is logged once at startup at INFO level. To see it:

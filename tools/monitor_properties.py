@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from known_props import load_known_props  # noqa: E402
+from known_props import load_known_props, unsafe_for  # noqa: E402
 
 DREAME_SALT = "RAylYC%fmSKp7%Tq"
 DREAME_USER_AGENT = "Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)"
@@ -118,11 +118,11 @@ class DreameMonitor:
             pass
         return None
 
-    def discover_properties(self, did, host, max_siid=20, max_piid=20):
-        """Initial scan to find all readable properties."""
+    def discover_properties(self, did, host, max_siid=20, max_piid=20, skip=()):
+        """Initial scan to find all readable properties. Never requests anything in skip."""
         found = []
         for siid in range(1, max_siid + 1):
-            batch = [(siid, piid) for piid in range(1, max_piid + 1)]
+            batch = [(siid, piid) for piid in range(1, max_piid + 1) if (siid, piid) not in skip]
             for i in range(0, len(batch), 10):
                 result = self.get_properties(did, batch[i : i + 10], host)
                 if result and isinstance(result, list):
@@ -240,6 +240,11 @@ def main():
         type=int, action="append", dest="ignore_siids", default=[], metavar="SIID",
         help="Ignore all properties from this siid (repeatable, e.g. -s 3 -s 5)",
     )
+    parser.add_argument(
+        "--full-scan", action="store_true",
+        help="Scan siid 1-20 / piid 1-20 even on models known to crash on some reads "
+             "(unsafe properties are still skipped)",
+    )
     args = parser.parse_args()
     ignore_siids = set(args.ignore_siids)
 
@@ -267,18 +272,32 @@ def main():
     host = dev.get("bindDomain")
     print(f"{GREEN}✅ Found: {dev.get('customName', '?')} ({dev.get('model', '?')}){RESET}")
 
-    # Discover all properties
-    print(f"\n{CYAN}Scanning all properties (siid 1-20, piid 1-20)...{RESET}")
-    props = mon.discover_properties(did, host)
+    # Labels from the integration's property map
+    labels = load_known_props()
+
+    model = dev.get("model", "?")
+    unsafe = unsafe_for(model)
+    if unsafe:
+        print(f"{YELLOW}Never reading on {model} (known to crash it): "
+              f"{', '.join(f'{s}.{p}' for s, p in sorted(unsafe))}{RESET}")
+
+    if unsafe and not args.full_scan:
+        # Fragile model: don't fire ~40 batched requests at it. Watch only the
+        # properties the integration knows; use safe_probe.py --scan to find more.
+        print(f"\n{CYAN}Watching the integration's known properties only "
+              f"(--full-scan to scan everything; tools/safe_probe.py --scan is safer){RESET}")
+        candidates = [k for k in sorted(labels) if k not in unsafe]
+        first = mon.poll_snapshot(did, host, candidates)
+        props = sorted(first)  # keep only the ones this device actually has
+    else:
+        print(f"\n{CYAN}Scanning all properties (siid 1-20, piid 1-20)...{RESET}")
+        props = mon.discover_properties(did, host, skip=unsafe)
     if ignore_siids:
         props = [(s, p) for s, p in props if s not in ignore_siids]
         print(f"{GREEN}✅ Found {len(props)} readable properties "
               f"(ignoring siid {sorted(ignore_siids)}){RESET}\n")
     else:
         print(f"{GREEN}✅ Found {len(props)} readable properties{RESET}\n")
-
-    # Labels from the integration's property map
-    labels = load_known_props()
 
     # Range tracker
     ranges = RangeTracker()
