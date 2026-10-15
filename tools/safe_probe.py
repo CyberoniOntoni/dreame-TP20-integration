@@ -119,10 +119,7 @@ def main():
         except ValueError:
             parser.error(f"{text!r} should look like 3.10")
 
-    known = load_known_props()
-    if not known and not args.scan:
-        print(f"{RED}❌ Could not load the integration's property list{RESET}")
-        sys.exit(1)
+    known = {}
 
     def label_of(k):
         return known.get(k, "?")
@@ -141,6 +138,11 @@ def main():
     did, host = str(dev["did"]), dev.get("bindDomain")
     model = dev.get("model", "?")
     print(f"{GREEN}✅ Device: {dev.get('customName') or '?'} ({model}){RESET}")
+
+    known.update(load_known_props(model))  # this model's own property map
+    if not known and not args.scan:
+        print(f"{RED}❌ Could not load the integration's property list{RESET}")
+        sys.exit(1)
 
     unsafe = unsafe_for(model)
     if unsafe:

@@ -30,6 +30,7 @@ class DreameTimer(DreameEntity, NumberEntity):
     def __init__(self, coordinator, purifier):
         super().__init__(coordinator, purifier)
         self._attr_unique_id = f"{purifier.unique_id}_timer"
+        self._attr_native_max_value = purifier.profile.timer_max
 
     @property
     def native_value(self):

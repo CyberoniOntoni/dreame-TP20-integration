@@ -35,7 +35,7 @@ DREAME_TENANT_ID = "000000"
 
 # ─── Properties the integration already maps ──────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from known_props import INTEGRATION_API, load_known_props, unsafe_for  # noqa: E402
+from known_props import INTEGRATION_API, load_known_props, request_id, unsafe_for  # noqa: E402
 
 KNOWN = load_known_props()
 
@@ -120,12 +120,13 @@ class DreameCloudProber:
     def send_command(self, did: str, method: str, params, host: str = None):
         host_prefix = f"-{host.split('.')[0]}" if host else ""
         url = f"{self.api_url}/dreame-iot-com{host_prefix}/device/sendCommand"
+        rid = request_id()
         payload = {
             "did": str(did),
-            "id": 1,
+            "id": rid,
             "data": {
                 "did": str(did),
-                "id": 1,
+                "id": rid,
                 "method": method,
                 "params": params,
             },
@@ -482,6 +483,7 @@ def interactive_mode_discovery(prober, did, host, mode_prop):
 
 
 def main():
+    global KNOWN
     parser = argparse.ArgumentParser(
         description="Dreame air purifier MiOT Property Discovery Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -543,6 +545,8 @@ def main():
     name = device.get("customName", "")
 
     log.info("\n✅ Found purifier: %s (%s) did=%s host=%s", name, model, did, host)
+
+    KNOWN = load_known_props(model)  # this model's own property map
 
     unsafe = unsafe_for(model)
     if unsafe:

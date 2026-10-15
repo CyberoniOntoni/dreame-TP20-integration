@@ -42,6 +42,7 @@ SENSORS: tuple[SensorSpec, ...] = (
     SensorSpec("tvoc", "tvoc", SensorDeviceClass.VOLATILE_ORGANIC_COMPOUNDS, _M, _UG),
     SensorSpec("air_quality", "air_quality_level", icon="mdi:air-filter"),
     SensorSpec("aq_percent", "aq_percent", state_class=_M, unit=PERCENTAGE, icon="mdi:air-filter"),
+    SensorSpec("fan_level", "fan_level", state_class=_M, icon="mdi:fan"),
     SensorSpec("hepa_life", "hepa_life", state_class=_M, unit=PERCENTAGE, icon="mdi:air-filter", category=_D),
     SensorSpec("hepa_used", "hepa_hours_used", state_class=_T, unit=UnitOfTime.HOURS, icon="mdi:clock-outline", category=_D),
     SensorSpec("hepa_days", "hepa_days_total", unit=UnitOfTime.DAYS, icon="mdi:calendar-clock", category=_D),
