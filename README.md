@@ -53,9 +53,9 @@ What you get depends on what your model reports. Features it doesn't have are no
 2. Go to the device page → ⋮ → **Download diagnostics**. The file lists every raw property the device reported (`siid.piid`: value) and which known attributes are missing. It contains no credentials, device IDs or MACs.
 3. For properties outside the known map, scan everything with:
    ```sh
-   python3 tools/discover_pm10.py -u <email> -p <password> --country <region>
+   python3 tools/discover_properties.py -u <email> -p <password> --country <region>
    ```
-   `tools/monitor_pm10.py` watches values change live while you use the app, and `tools/set_property.py` writes a single property. `re.txt` has the PM10 map as a reference.
+   `tools/monitor_properties.py` watches values change live while you use the app, and `tools/set_property.py` writes a single property. `re.txt` has the PM10 map as a reference.
 4. Update `PROP_DEFS` in `custom_components/dreame_airpurifier/api.py`.
 
 The same property list is logged once at startup at INFO level. To see it:

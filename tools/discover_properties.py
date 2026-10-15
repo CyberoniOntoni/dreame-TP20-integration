@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Dreame PM10 (dreame.airp.cvf24a) — MiOT Property Discovery & Reverse Engineering Tool
+Dreame air purifier — MiOT Property Discovery & Reverse Engineering Tool
 
-This script connects to the Dreame Cloud API, finds your PM10 air purifier,
+Works with any Dreame purifier on the Dreame Home app (PM10, TP20, ...). If the
+account has several, the PM10 (dreame.airp.cvf24a) is preferred.
+
+This script connects to the Dreame Cloud API, finds your air purifier,
 and systematically probes ALL possible siid/piid combinations to discover
 the full property map. It also tests known actions.
 
 Usage:
-    python3 tools/discover_pm10.py --username YOUR_EMAIL --password YOUR_PASSWORD [--country us]
+    python3 tools/discover_properties.py --username YOUR_EMAIL --password YOUR_PASSWORD [--country us]
 
 The output is a full report of every readable property on the device,
-which you can use to update api.py for PM10 support.
+which you can use to update PROP_DEFS in api.py for your model.
 """
 
 import argparse
@@ -22,6 +25,7 @@ import requests
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 # ─── Dreame Cloud Constants ─────────────────────────────────────────────────
 DREAME_SALT = "RAylYC%fmSKp7%Tq"
@@ -29,40 +33,11 @@ DREAME_USER_AGENT = "Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)"
 DREAME_AUTH_BASIC = "Basic ZHJlYW1lX2FwcHYxOkFQXmR2QHpAU1FZVnhOODg="
 DREAME_TENANT_ID = "000000"
 
-# ─── Known AP10 Property Map (for comparison) ───────────────────────────────
-AP10_KNOWN = {
-    (2, 1): "Power (1=on, 2=standby)",
-    (2, 3): "Mode (0=Auto, 2=Sleep, 3=Custom, 4=Pet)",
-    (2, 4): "Fan Speed (1-5)",
-    (2, 5): "Fan Percent (read-only)",
-    (2, 6): "Ionizer (-1=auto, 0=off, 1=on)",
-    (3, 4): "Air Quality Level",
-    (3, 5): "PM2.5",
-    (4, 1): "Filter Life %",
-    (4, 2): "Filter Days Total",
-    (4, 3): "Filter Hours Used",
-    (6, 5): "LED",
-    (6, 6): "Buzzer",
-    (6, 7): "Child Lock",
-    (6, 8): "Light Mode",
-}
+# ─── Properties the integration already maps ──────────────────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from known_props import INTEGRATION_API, load_known_props  # noqa: E402
 
-# ─── PM10 Expected Differences ──────────────────────────────────────────────
-PM10_NOTES = """
-╔══════════════════════════════════════════════════════════════════════════╗
-║  DREAME PM10 (AirPursue PM10) — Known Feature Differences vs AP10     ║
-╠══════════════════════════════════════════════════════════════════════════╣
-║  ✓ 10 fan speed levels (AP10 has 5)                                   ║
-║  ✓ 3 modes: AI (Auto), Comfort, Pet  (AP10: Auto, Sleep, Custom, Pet)║
-║  ✓ Radar presence detection (5m range, 120° coverage)                 ║
-║  ✓ Tilt / follow-me airflow (dual-flow modulation)                    ║
-║  ✓ Airflow angles: 0°, 45°, 90°, 180°                                ║
-║  ✗ NO ionizer                                                         ║
-║  ✗ NO LED/buzzer/child lock/light mode toggles                        ║
-║  ✓ 7 sensors (PM2.5, formaldehyde, etc.)                              ║
-║  ✓ LCD display                                                        ║
-╚══════════════════════════════════════════════════════════════════════════╝
-"""
+KNOWN = load_known_props()
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
@@ -187,8 +162,8 @@ class DreameCloudProber:
         return self.send_command(did, "action", action_params, host)
 
 
-def find_pm10(devices: list) -> dict | None:
-    """Find the PM10 among all devices."""
+def find_purifier(devices: list) -> dict | None:
+    """Find an air purifier among all devices (prefers the PM10 if there are several)."""
     purifiers = [d for d in devices if ".airp." in d.get("model", "")]
     if not purifiers:
         return None
@@ -238,15 +213,15 @@ def probe_all_properties(prober: DreameCloudProber, did: str, host: str):
                         }
                         total_found += 1
 
-                        # Check if this was known on AP10
-                        ap10_label = AP10_KNOWN.get(key, "*** NEW / UNKNOWN ***")
+                        # Check if the integration already maps this property
+                        known_label = KNOWN.get(key, "*** not in integration map ***")
                         log.info(
-                            "  ✓ siid=%2d piid=%2d → %s (%s)  [AP10: %s]",
+                            "  ✓ siid=%2d piid=%2d → %s (%s)  [%s]",
                             siid_r,
                             piid_r,
                             repr(value),
                             type(value).__name__,
-                            ap10_label,
+                            known_label,
                         )
 
             # Small delay to avoid rate limiting
@@ -305,21 +280,19 @@ def probe_actions(prober: DreameCloudProber, did: str, host: str):
     log.info("  NOTE: We only REPORT action availability, we don't invoke them.")
     log.info("  Actions will be tested with empty params to see if siid/aiid exists.\n")
 
-    # Known AP10 action
-    log.info("  Known AP10 action: siid=2 aiid=3 (Toggle Power)")
+    log.info("  Actions the integration uses: 2.3 toggle power, 4.1 reset HEPA filter, 5.1 reset carbon filter")
 
-    # Potential PM10 actions to check existence of
-    # We'll try to detect if the action endpoint exists without actually executing
+    # Candidate actions to check (listed only, never executed)
     action_candidates = [
         (2, 1, "Start/Stop"),
         (2, 2, "Unknown action 2.2"),
-        (2, 3, "Toggle Power (AP10 known)"),
+        (2, 3, "Toggle Power (used by integration)"),
         (2, 4, "Unknown action 2.4"),
         (2, 5, "Unknown action 2.5"),
-        (4, 1, "Reset Filter (AP10 known)"),
+        (4, 1, "Reset HEPA filter (used by integration)"),
         (4, 2, "Unknown action 4.2"),
-        (5, 1, "Potential radar/swing action"),
-        (5, 2, "Potential tilt action"),
+        (5, 1, "Reset carbon filter (used by integration)"),
+        (5, 2, "Unknown action 5.2"),
         (6, 1, "Unknown action 6.1"),
         (7, 1, "Unknown action 7.1"),
         (8, 1, "Unknown action 8.1"),
@@ -334,8 +307,7 @@ def probe_actions(prober: DreameCloudProber, did: str, host: str):
 
 def test_fan_speed_range(prober: DreameCloudProber, did: str, host: str, speed_prop):
     """
-    Read the fan speed property to determine current level and validate
-    the 1-10 range. Does NOT write any values.
+    Read the fan speed property and show its current level. Does NOT write any values.
     """
     log.info("\n" + "=" * 70)
     log.info("  PHASE 4: FAN SPEED RANGE DETECTION")
@@ -348,7 +320,7 @@ def test_fan_speed_range(prober: DreameCloudProber, did: str, host: str, speed_p
             if prop.get("code", -1) == 0:
                 current = prop.get("value")
                 log.info("  Current fan speed: %s (siid=%d, piid=%d)", current, siid, piid)
-                log.info("  Expected range: 1-10 for PM10 (vs 1-5 for AP10)")
+                log.info("  The integration currently assumes 1-10 (PM10). Check your model's range in the app.")
                 return current
     log.info("  Could not read fan speed property")
     return None
@@ -356,10 +328,8 @@ def test_fan_speed_range(prober: DreameCloudProber, did: str, host: str, speed_p
 
 def test_mode_values(prober: DreameCloudProber, did: str, host: str, mode_prop):
     """
-    Read the current mode value. The PM10 is expected to have:
-    - AI mode (likely 0 or 1)
-    - Comfort mode (likely 2 or a new value)
-    - Pet mode (likely 4, same as AP10)
+    Read the current mode value. Mode numbers differ between models; use
+    --interactive to map each mode in the app to its value.
     """
     log.info("\n" + "=" * 70)
     log.info("  PHASE 5: MODE VALUE DETECTION")
@@ -372,8 +342,7 @@ def test_mode_values(prober: DreameCloudProber, did: str, host: str, mode_prop):
             if prop.get("code", -1) == 0:
                 current = prop.get("value")
                 log.info("  Current mode value: %s (siid=%d, piid=%d)", current, siid, piid)
-                log.info("  AP10 modes: 0=Auto, 2=Sleep, 3=Custom, 4=Pet")
-                log.info("  PM10 expected: AI (Auto?), Comfort, Pet")
+                log.info("  Integration modes (PM10, const.py): 0=Auto, 2=Comfort, 3=Custom, 4=Pet")
                 log.info("")
                 log.info("  To discover all mode values, you'll need to:")
                 log.info("    1. Use the Dreamehome app to switch to each mode")
@@ -394,7 +363,7 @@ def generate_report(
 
     report = []
     report.append("=" * 70)
-    report.append(f"  DREAME PM10 PROPERTY DISCOVERY REPORT")
+    report.append(f"  DREAME AIR PURIFIER PROPERTY DISCOVERY REPORT")
     report.append(f"  Generated: {datetime.now().isoformat()}")
     report.append("=" * 70)
     report.append("")
@@ -409,36 +378,36 @@ def generate_report(
     report.append("-" * 70)
     report.append("  ALL DISCOVERED PROPERTIES")
     report.append("-" * 70)
-    report.append(f"  {'siid':>4}  {'piid':>4}  {'Value':>20}  {'Type':>8}  AP10 Mapping")
+    report.append(f"  {'siid':>4}  {'piid':>4}  {'Value':>20}  {'Type':>8}  Integration attribute")
     report.append(f"  {'----':>4}  {'----':>4}  {'----':>20}  {'----':>8}  {'----------'}")
 
     for (siid, piid) in sorted(all_props.keys()):
         info = all_props[(siid, piid)]
-        ap10 = AP10_KNOWN.get((siid, piid), "** UNKNOWN **")
+        known_label = KNOWN.get((siid, piid), "** not mapped **")
         report.append(
-            f"  {siid:4d}  {piid:4d}  {str(info['value']):>20}  {info['type']:>8}  {ap10}"
+            f"  {siid:4d}  {piid:4d}  {str(info['value']):>20}  {info['type']:>8}  {known_label}"
         )
 
     report.append("")
 
-    # Comparison with AP10
+    # Comparison with the integration's property map
     report.append("-" * 70)
-    report.append("  AP10 PROPERTIES MISSING ON THIS DEVICE")
+    report.append("  INTEGRATION PROPERTIES NOT REPORTED BY THIS DEVICE")
     report.append("-" * 70)
-    for key, label in sorted(AP10_KNOWN.items()):
+    for key, label in sorted(KNOWN.items()):
         if key not in all_props:
-            report.append(f"  siid={key[0]:2d} piid={key[1]:2d}  {label}  → NOT FOUND (removed on PM10?)")
+            report.append(f"  siid={key[0]:2d} piid={key[1]:2d}  {label}  → not reported (no entity will be created)")
 
     report.append("")
     report.append("-" * 70)
-    report.append("  NEW PROPERTIES NOT ON AP10")
+    report.append("  PROPERTIES NOT IN THE INTEGRATION MAP")
     report.append("-" * 70)
     for key in sorted(all_props.keys()):
-        if key not in AP10_KNOWN:
+        if key not in KNOWN:
             info = all_props[key]
             report.append(
                 f"  siid={key[0]:2d} piid={key[1]:2d}  value={info['value']!r:>20}  ({info['type']})"
-                f"  → PM10-SPECIFIC, NEEDS INVESTIGATION"
+                f"  → needs investigation"
             )
 
     report.append("")
@@ -448,23 +417,22 @@ def generate_report(
     report.append("  SUGGESTED api.py PROPERTY MAP UPDATE")
     report.append("-" * 70)
     report.append("""
-# === MiOT Property Map for dreame.airp.cvf24a (Dreame PM10) ===
-# DISCOVERED by discover_pm10.py on {date}
+# === MiOT Property Map for {model} ===
+# DISCOVERED by discover_properties.py on {date}
 #
 # TODO: Label each property after testing with the Dreamehome app.
 # Workflow:
 #   1. Change a setting in the app (e.g., switch to Pet mode)
 #   2. Re-run this script to see which property value changed
 #   3. Update the labels below
-""".format(date=datetime.now().strftime("%Y-%m-%d")))
+""".format(model=device_info.get("model", "?"), date=datetime.now().strftime("%Y-%m-%d")))
 
     for (siid, piid) in sorted(all_props.keys()):
         info = all_props[(siid, piid)]
-        ap10 = AP10_KNOWN.get((siid, piid), "UNKNOWN — needs investigation")
-        var_name = f"PROP_S{siid}_P{piid}"
+        known_label = KNOWN.get((siid, piid), "not mapped — needs investigation")
         report.append(
             f'PROP_S{siid}_P{piid} = {{"siid": {siid}, "piid": {piid}}}  '
-            f'# value={info["value"]!r} ({info["type"]})  [{ap10}]'
+            f'# value={info["value"]!r} ({info["type"]})  [{known_label}]'
         )
 
     report.append("")
@@ -515,15 +483,14 @@ def interactive_mode_discovery(prober, did, host, mode_prop):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Dreame PM10 MiOT Property Discovery Tool",
+        description="Dreame air purifier MiOT Property Discovery Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=PM10_NOTES,
     )
     parser.add_argument("--username", "-u", required=True, help="Dreame account email/phone")
     parser.add_argument("--password", "-p", required=True, help="Dreame account password")
     parser.add_argument("--country", "-c", default="us", choices=["us", "cn", "eu", "sg", "kr"],
                         help="Country/region (default: us)")
-    parser.add_argument("--output", "-o", default="tools/pm10_discovery_report.txt",
+    parser.add_argument("--output", "-o", default="tools/discovery_report.txt",
                         help="Output report file path")
     parser.add_argument("--interactive", "-i", action="store_true",
                         help="Enable interactive mode discovery (switch modes in app)")
@@ -533,7 +500,7 @@ def main():
                         help="Also output raw JSON data")
     args = parser.parse_args()
 
-    print(PM10_NOTES)
+    log.info("Integration property map: %d known properties from %s", len(KNOWN), INTEGRATION_API)
 
     # ── Step 1: Login ────────────────────────────────────────────────────
     log.info("Step 1: Logging into Dreame Cloud (%s)...", args.country)
@@ -559,18 +526,18 @@ def main():
             d.get("did", "?"),
         )
 
-    # ── Step 3: Find PM10 ───────────────────────────────────────────────
-    pm10 = find_pm10(devices)
-    if not pm10:
+    # ── Step 3: Find purifier ───────────────────────────────────────────
+    device = find_purifier(devices)
+    if not device:
         log.error("❌ No air purifier (.airp.) found. Available models:")
         for d in devices:
             log.error("    %s", d.get("model"))
         sys.exit(1)
 
-    did = str(pm10["did"])
-    host = pm10.get("bindDomain")
-    model = pm10.get("model", "?")
-    name = pm10.get("customName", "")
+    did = str(device["did"])
+    host = device.get("bindDomain")
+    model = device.get("model", "?")
+    name = device.get("customName", "")
 
     log.info("\n✅ Found purifier: %s (%s) did=%s host=%s", name, model, did, host)
 
@@ -582,12 +549,12 @@ def main():
     if args.extended:
         extended_props = probe_extended_properties(prober, did, host)
 
-    # ── Step 5: Test specific PM10 features ──────────────────────────────
+    # ── Step 5: Read fan speed and mode ──────────────────────────────────
     # Try to detect fan speed and mode properties
     speed_prop = None
     mode_prop = None
 
-    for key in [(2, 4), (2, 3)]:  # AP10 fan speed / mode locations
+    for key in [(2, 4), (2, 3)]:  # fan speed / mode locations used by the integration
         if key in standard_props:
             if key == (2, 4):
                 speed_prop = key
@@ -604,7 +571,7 @@ def main():
     probe_actions(prober, did, host)
 
     # ── Step 7: Generate report ──────────────────────────────────────────
-    report = generate_report(pm10, standard_props, extended_props, args.output)
+    report = generate_report(device, standard_props, extended_props, args.output)
     print("\n" + report)
 
     # ── Step 8: JSON output ──────────────────────────────────────────────
@@ -615,7 +582,7 @@ def main():
                 "name": name,
                 "model": model,
                 "did": did,
-                "mac": pm10.get("mac", ""),
+                "mac": device.get("mac", ""),
                 "host": host,
             },
             "properties": {
@@ -624,7 +591,7 @@ def main():
                     "piid": k[1],
                     "value": v["value"],
                     "type": v["type"],
-                    "ap10_label": AP10_KNOWN.get(k, None),
+                    "integration_attr": KNOWN.get(k),
                 }
                 for k, v in {**standard_props, **extended_props}.items()
             },
@@ -644,16 +611,14 @@ def main():
     log.info("=" * 70)
     log.info("""
   1. Review the report at: %s
-  2. For UNKNOWN properties, use the Dreamehome app to toggle settings
-     one at a time, then re-run this script to see which value changed.
+  2. For properties not in the integration map, watch them change while you
+     use the Dreamehome app:
+       python3 tools/monitor_properties.py -u EMAIL -p PASS
   3. To discover mode values specifically, run with --interactive:
-       python3 tools/discover_pm10.py -u EMAIL -p PASS --interactive
-  4. Once you have the full property map, update api.py:
-     - Change fan speed range from 1-5 to 1-10
-     - Update mode constants (AI/Comfort/Pet)
-     - Remove ionizer/LED/buzzer/child_lock if not found
-     - Add radar/tilt/follow properties
-  5. Update const.py PRESET_MODES and fan.py speed_count accordingly.
+       python3 tools/discover_properties.py -u EMAIL -p PASS --interactive
+  4. Update PROP_DEFS in custom_components/dreame_airpurifier/api.py, and the
+     mode list (const.py) and fan speed range (fan.py, api.py) if your model
+     differs from the PM10.
 """, args.output)
 
 

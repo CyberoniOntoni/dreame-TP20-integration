@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dreame PM10 — Live Property Monitor / Diff Tool
+Dreame air purifier — Live Property Monitor / Diff Tool
 
 Continuously polls ALL discovered properties and highlights changes.
 This is the fastest way to figure out which siid/piid maps to which feature:
@@ -9,7 +9,7 @@ This is the fastest way to figure out which siid/piid maps to which feature:
   3. See which property value changed in the terminal
 
 Usage:
-    python3 tools/monitor_pm10.py --username EMAIL --password PASS [--interval 5]
+    python3 tools/monitor_properties.py --username EMAIL --password PASS [--interval 5]
 """
 
 import argparse
@@ -20,6 +20,10 @@ import requests
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from known_props import load_known_props  # noqa: E402
 
 DREAME_SALT = "RAylYC%fmSKp7%Tq"
 DREAME_USER_AGENT = "Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)"
@@ -225,12 +229,12 @@ def print_diff(prev, curr, labels=None, ranges=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Dreame PM10 Live Property Monitor")
+    parser = argparse.ArgumentParser(description="Dreame air purifier Live Property Monitor")
     parser.add_argument("--username", "-u", required=True)
     parser.add_argument("--password", "-p", required=True)
     parser.add_argument("--country", "-c", default="us")
     parser.add_argument("--interval", "-i", type=int, default=5, help="Poll interval in seconds")
-    parser.add_argument("--log", "-l", default="tools/pm10_changes.log", help="Log file for changes")
+    parser.add_argument("--log", "-l", default="tools/property_changes.log", help="Log file for changes")
     parser.add_argument(
         "--ignore-siid", "-s",
         type=int, action="append", dest="ignore_siids", default=[], metavar="SIID",
@@ -240,7 +244,7 @@ def main():
     ignore_siids = set(args.ignore_siids)
 
     print(f"\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════════╗{RESET}")
-    print(f"{BOLD}{CYAN}║   Dreame PM10 — Live Property Monitor                   ║{RESET}")
+    print(f"{BOLD}{CYAN}║   Dreame Purifier — Live Property Monitor               ║{RESET}")
     print(f"{BOLD}{CYAN}║   Change settings in the Dreamehome app to see diffs    ║{RESET}")
     print(f"{BOLD}{CYAN}╚══════════════════════════════════════════════════════════╝{RESET}\n")
 
@@ -273,23 +277,8 @@ def main():
     else:
         print(f"{GREEN}✅ Found {len(props)} readable properties{RESET}\n")
 
-    # Known labels from AP10
-    labels = {
-        (2, 1): "Power",
-        (2, 3): "Mode",
-        (2, 4): "Fan Speed",
-        (2, 5): "Fan %",
-        (2, 6): "Ionizer",
-        (3, 4): "AQ Level",
-        (3, 5): "PM2.5",
-        (4, 1): "Filter Life",
-        (4, 2): "Filter Days",
-        (4, 3): "Filter Used",
-        (6, 5): "LED",
-        (6, 6): "Buzzer",
-        (6, 7): "Child Lock",
-        (6, 8): "Light Mode",
-    }
+    # Labels from the integration's property map
+    labels = load_known_props()
 
     # Range tracker
     ranges = RangeTracker()

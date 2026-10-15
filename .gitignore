@@ -15,3 +15,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# Discovery output (contains device ID and MAC)
+tools/discovery_report.txt
+tools/discovery_report.json

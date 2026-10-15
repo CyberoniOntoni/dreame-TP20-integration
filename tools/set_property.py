@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dreame PM10 — Set Property Value
+Dreame air purifier — Set Property Value
 
 Directly set a siid/piid property or call an action on the device.
 
@@ -151,7 +151,7 @@ def parse_value(raw: str, force_type: str = None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Dreame PM10 — Set/Read Property or Call Action",
+        description="Dreame air purifier — Set/Read Property or Call Action",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

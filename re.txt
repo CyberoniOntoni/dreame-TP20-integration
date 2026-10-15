@@ -1,5 +1,5 @@
-python3 tools/monitor_pm10.py -u $YOUR_EMAIL -p $YOUR_PASSWORD
-python3 tools/monitor_pm10.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --interval 1 -s 3
+python3 tools/monitor_properties.py -u $YOUR_EMAIL -p $YOUR_PASSWORD
+python3 tools/monitor_properties.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --interval 1 -s 3
 
 python3 tools/set_property.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --siid 2 --piid 4 --value 7 // fan
 python3 tools/set_property.py -u $YOUR_EMAIL -p $YOUR_PASSWORD --siid 2 --piid 7 --value 45 // swivel
