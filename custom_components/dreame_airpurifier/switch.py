@@ -26,6 +26,7 @@ SWITCHES: tuple[SwitchSpec, ...] = (
     SwitchSpec("human_sensing", "human_sensing", "set_human_sensing", "mdi:motion-sensor"),
     SwitchSpec("follow_mode", "follow_mode", "set_follow_mode", "mdi:rotate-3d-variant"),
     SwitchSpec("voice_assistant", "voice_assistant", "set_voice_assistant", "mdi:microphone"),
+    SwitchSpec("child_lock", "child_lock", "set_child_lock", "mdi:lock"),
 )
 
 

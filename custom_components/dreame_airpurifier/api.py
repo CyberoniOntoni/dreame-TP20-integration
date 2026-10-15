@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import aiohttp
 
-from .const import MODE_AUTO, MODE_NAMES, SWIVEL_OPTIONS, UNSAFE_PROPS
+from .const import MODE_AUTO, SWIVEL_OPTIONS, UNSAFE_PROPS, ModelProfile, profile_for
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +71,30 @@ PROP_DEFS: tuple[PropDef, ...] = (
     PropDef("timer",                6,  8, 0),
 )
 
+# TP20 (dreame.airp.u2630). Mapped by watching the device while using the app and by
+# single reads/writes. Reading 3.10 crashes it (see UNSAFE_PROPS); 2.1 power is
+# read-only (written with -4002), so power goes through the toggle action.
+TP20_PROP_DEFS: tuple[PropDef, ...] = (
+    PropDef("power",                2,  1, 0),
+    PropDef("mode_value",           2,  3, 0),
+    PropDef("fan_speed",            2,  4, 0),
+    PropDef("fan_level",            2, 10, 0),   # mirrors fan_speed; read-only
+    PropDef("air_quality_level",    3,  4, 0),
+    PropDef("pm25",                 3,  5, 0),
+    # 3.12 is left out: it rises with pollution (~70-84, 0 when off), but the app
+    # doesn't show it, so there's nothing to check a "%" reading against.
+    PropDef("hepa_life",            4,  1, 0),
+    PropDef("temp_unit",            6,  4, 0),
+    PropDef("timer",                6,  8, 0),
+    PropDef("child_lock",           6, 10, False, bool),
+    PropDef("continuous_monitoring", 6, 15, False, bool),  # measures air quality while off
+)
+
+# Models whose properties differ from the PM10 map above.
+MODEL_PROP_DEFS: dict[str, tuple[PropDef, ...]] = {
+    "dreame.airp.u2630": TP20_PROP_DEFS,
+}
+
 # Pre-compute poll batches (≤15 props per request)
 _BATCH_SIZE = 15
 
@@ -77,6 +103,10 @@ def _batches(defs: tuple[PropDef, ...]) -> tuple[tuple[PropDef, ...], ...]:
     return tuple(defs[i : i + _BATCH_SIZE] for i in range(0, len(defs), _BATCH_SIZE))
 
 ACTION_TOGGLE_POWER = (2, 3)  # (siid, aiid)
+
+# Every request gets its own id. With a fixed id, replies got mixed up when another
+# client (the app, a tool) talked to the device at the same time.
+_request_ids = itertools.count(random.randint(1000, 1_000_000))
 
 
 # ── Cloud API ──────────────────────────────────────────────────────────
@@ -187,7 +217,8 @@ class DreameCloudAPI:
             return None
         host_prefix = f"-{host.split('.')[0]}" if host else ""
         url = f"{self.api_url}/dreame-iot-com{host_prefix}/device/sendCommand"
-        payload = {"did": did, "id": 1, "data": {"did": did, "id": 1, "method": method, "params": params}}
+        req_id = next(_request_ids)
+        payload = {"did": did, "id": req_id, "data": {"did": did, "id": req_id, "method": method, "params": params}}
         try:
             async with self._session.post(url, headers=self._auth_headers(), json=payload, timeout=_TIMEOUT) as resp:
                 if resp.status == 200:
@@ -214,23 +245,40 @@ class DreameCloudAPI:
         result = await self.send_command(did, "get_properties", params, host)
         if not isinstance(result, list):
             return None
+        wanted = {(p.siid, p.piid) for p in prop_defs}
         values: dict[tuple[int, int], Any] = {}
         for prop in result:
+            key = (prop.get("siid"), prop.get("piid"))
+            if key not in wanted:
+                # A reply meant for another request. Treat this request as failed rather
+                # than as "device has none of these", which would hide their entities.
+                _LOGGER.debug("Reply contained unrequested property %s; treating request as failed", key)
+                return None
             if prop.get("code", -1) == 0:
-                values[(prop["siid"], prop["piid"])] = prop.get("value")
+                values[key] = prop.get("value")
         return values
 
     async def set_property(self, did: str, siid: int, piid: int, value: Any, host: str | None = None) -> bool:
         params = [{"did": did, "siid": siid, "piid": piid, "value": value}]
         result = await self.send_command(did, "set_properties", params, host)
-        return bool(result and isinstance(result, list) and result and result[0].get("code", -1) == 0)
+        if not (isinstance(result, list) and result):
+            return False
+        first = result[0]
+        if (first.get("siid"), first.get("piid")) != (siid, piid):
+            return False
+        if first.get("code", -1) != 0:
+            _LOGGER.warning("Device rejected setting %s.%s = %r (code %s)", siid, piid, value, first.get("code"))
+            return False
+        return True
 
     async def call_action(self, did: str, siid: int, aiid: int, params: list | None = None, host: str | None = None) -> bool:
         payload = {"did": did, "siid": siid, "aiid": aiid, "in": params or []}
         result = await self.send_command(did, "action", payload, host)
-        if result:
-            return result.get("code", -1) == 0 if isinstance(result, dict) else True
-        return False
+        if not isinstance(result, dict):
+            return False
+        if "aiid" in result and (result.get("siid"), result.get("aiid")) != (siid, aiid):
+            return False
+        return result.get("code", -1) == 0
 
     async def get_devices(self) -> list | None:
         if not await self._ensure_token():
@@ -259,11 +307,12 @@ class DreameCloudAPI:
 class DreameAirPurifier:
     """Dreame air purifier backed by a data-driven property registry.
 
-    All properties defined in PROP_DEFS are accessible as attributes via __getattr__.
-    Derived properties (is_on, mode, fan_speed_percent, auto_fan) are explicit.
+    Properties from the model's PropDef table (PROP_DEFS, or MODEL_PROP_DEFS for other
+    models) are accessible as attributes via __getattr__. Derived properties (is_on,
+    mode, fan_speed_percent) are explicit; control behaviour comes from the model profile.
     """
 
-    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available", "_supported", "_detected", "_partial", "_raw", "_poll_defs", "_skipped")
+    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available", "_supported", "_detected", "_partial", "_raw", "_poll_defs", "_skipped", "_defs", "_profile")
 
     def __init__(self, api: DreameCloudAPI, device_info: dict):
         self._api = api
@@ -275,7 +324,9 @@ class DreameAirPurifier:
             device_info.get("customName")
             or device_info.get("deviceInfo", {}).get("displayName", "Dreame Air Purifier")
         )
-        self._state: dict[str, Any] = {p.attr: p.default for p in PROP_DEFS}
+        self._defs: tuple[PropDef, ...] = MODEL_PROP_DEFS.get(self._model, PROP_DEFS)
+        self._profile: ModelProfile = profile_for(self._model)
+        self._state: dict[str, Any] = {p.attr: p.default for p in self._defs}
         self._available = True
         # Attributes the device has actually reported (code 0, non-null value).
         # Used to skip creating entities for properties a model doesn't have.
@@ -290,8 +341,8 @@ class DreameAirPurifier:
         # Properties to poll. Starts as everything except reads known to crash
         # this model; narrowed to what the device supports once detected.
         unsafe = UNSAFE_PROPS.get(self._model, frozenset())
-        self._poll_defs: tuple[PropDef, ...] = tuple(p for p in PROP_DEFS if (p.siid, p.piid) not in unsafe)
-        self._skipped: list[str] = sorted(p.attr for p in PROP_DEFS if (p.siid, p.piid) in unsafe)
+        self._poll_defs: tuple[PropDef, ...] = tuple(p for p in self._defs if (p.siid, p.piid) not in unsafe)
+        self._skipped: list[str] = sorted(p.attr for p in self._defs if (p.siid, p.piid) in unsafe)
 
     def __getattr__(self, name: str) -> Any:
         """Fall-through to _state dict for registry-managed attributes."""
@@ -326,6 +377,10 @@ class DreameAirPurifier:
     def available(self) -> bool:
         return self._available
 
+    @property
+    def profile(self) -> ModelProfile:
+        return self._profile
+
     # ── Derived properties ──────────────────────────────────────────────
 
     @property
@@ -334,16 +389,16 @@ class DreameAirPurifier:
 
     @property
     def mode(self) -> str:
-        v = self._state["mode_value"]
-        return MODE_NAMES.get(v, f"Unknown ({v})")
+        v = self._state.get("mode_value")
+        return self._profile.modes.get(v, f"Unknown ({v})")
 
     @property
     def fan_speed_percent(self) -> int:
-        return self._state["fan_speed"] * 10
+        return round(self._state.get("fan_speed", 0) * 100 / self._profile.speed_count)
 
     @property
     def auto_fan(self) -> bool:
-        return self._state["auto_fan_raw"] == 0
+        return self._state.get("auto_fan_raw", 0) == 0
 
     def supports(self, attr: str) -> bool:
         """True if the device has reported a value for this registry attribute."""
@@ -360,7 +415,7 @@ class DreameAirPurifier:
 
     @property
     def unsupported_attrs(self) -> list[str]:
-        return sorted(p.attr for p in PROP_DEFS if p.attr not in self._supported)
+        return sorted(p.attr for p in self._defs if p.attr not in self._supported)
 
     @property
     def skipped_attrs(self) -> list[str]:
@@ -396,7 +451,7 @@ class DreameAirPurifier:
         self._partial = False
         self._available = True
         self._raw.update(all_values)
-        for p in PROP_DEFS:
+        for p in self._defs:
             raw = all_values.get((p.siid, p.piid))
             if raw is not None:
                 self._supported.add(p.attr)
@@ -416,45 +471,73 @@ class DreameAirPurifier:
 
     # ── Commands ────────────────────────────────────────────────────────
 
+    def _def(self, attr: str) -> PropDef | None:
+        return next((p for p in self._defs if p.attr == attr), None)
+
+    async def _set_attr(self, attr: str, value: Any) -> bool:
+        """Write a property by name, using this model's own property numbers."""
+        p = self._def(attr)
+        if p is None:
+            _LOGGER.warning("%s (%s) has no %s property; not writing", self._name, self._model, attr)
+            return False
+        return await self._api.set_property(self._did, p.siid, p.piid, value, self._host)
+
+    async def _refresh_power(self) -> None:
+        """Read power right before toggling, so a stale poll can't flip it the wrong way."""
+        p = self._def("power")
+        if p is None:
+            return
+        values = await self._api.get_properties(self._did, (p,), self._host)
+        if values and (p.siid, p.piid) in values:
+            self._state["power"] = values[(p.siid, p.piid)]
+
     async def toggle_power(self) -> bool:
         return await self._api.call_action(self._did, *ACTION_TOGGLE_POWER, host=self._host)
 
-    async def turn_on(self, mode: int = MODE_AUTO) -> bool:
-        if not self.is_on:
-            await self.toggle_power()
-        return await self.set_mode(mode)
+    async def turn_on(self, mode: int | None = None) -> bool:
+        await self._refresh_power()
+        if not self.is_on and not await self.toggle_power():
+            return False
+        return await self.set_mode(mode) if mode is not None else True
 
     async def turn_off(self) -> bool:
+        await self._refresh_power()
         return await self.toggle_power() if self.is_on else True
 
     async def set_mode(self, mode: int) -> bool:
-        return await self._api.set_property(self._did, 2, 3, mode, self._host)
+        if mode not in self._profile.modes:
+            _LOGGER.warning("%s: mode %s isn't valid for %s", self._name, mode, self._model)
+            return False
+        return await self._set_attr("mode_value", mode)
 
     async def set_fan_speed(self, speed: int) -> bool:
-        return await self._api.set_property(self._did, 2, 4, max(1, min(10, speed)), self._host)
+        return await self._set_attr("fan_speed", max(1, min(self._profile.speed_count, speed)))
 
     async def set_swivel(self, angle: int) -> bool:
         if angle not in SWIVEL_OPTIONS:
             return False
-        return await self._api.set_property(self._did, 2, 7, angle, self._host)
+        return await self._set_attr("swivel", angle)
 
     async def set_continuous_monitoring(self, enabled: bool) -> bool:
-        return await self._api.set_property(self._did, 2, 10, int(enabled), self._host)
+        return await self._set_attr("continuous_monitoring", int(enabled))
+
+    async def set_child_lock(self, enabled: bool) -> bool:
+        return await self._set_attr("child_lock", int(enabled))
 
     async def set_human_sensing(self, enabled: bool) -> bool:
-        return await self._api.set_property(self._did, 6, 5, int(enabled), self._host)
+        return await self._set_attr("human_sensing", int(enabled))
 
     async def set_follow_mode(self, enabled: bool) -> bool:
-        return await self._api.set_property(self._did, 6, 6, int(enabled), self._host)
+        return await self._set_attr("follow_mode", int(enabled))
 
     async def set_voice_assistant(self, enabled: bool) -> bool:
-        return await self._api.set_property(self._did, 6, 7, int(enabled), self._host)
+        return await self._set_attr("voice_assistant", int(enabled))
 
     async def set_temp_unit(self, unit: int) -> bool:
-        return await self._api.set_property(self._did, 6, 4, unit, self._host)
+        return await self._set_attr("temp_unit", unit)
 
     async def set_timer(self, hours: int) -> bool:
-        return await self._api.set_property(self._did, 6, 8, hours, self._host)
+        return await self._set_attr("timer", max(0, min(self._profile.timer_max, hours)))
 
     async def reset_hepa_filter(self) -> bool:
         return await self._api.call_action(self._did, 4, 1, host=self._host)

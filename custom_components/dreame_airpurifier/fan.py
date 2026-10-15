@@ -1,4 +1,4 @@
-"""Fan platform for Dreame Air Purifier."""
+"""Fan platform for Dreame air purifiers."""
 from __future__ import annotations
 
 from typing import Any
@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, MODE_NAME_TO_VALUE, MODE_NAMES, MODE_CUSTOM, MODE_AUTO
+from .const import DOMAIN
 from .entity import DreameEntity
 
 
@@ -18,22 +18,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class DreameFan(DreameEntity, FanEntity):
+    """Speeds, presets and the manual mode come from the model's profile."""
+
     _attr_name = None
-    _attr_speed_count = 10
-    _attr_preset_modes = list(MODE_NAMES.values())
 
     def __init__(self, coordinator, purifier):
         super().__init__(coordinator, purifier)
+        self._profile = purifier.profile
         self._attr_unique_id = f"{purifier.unique_id}_fan"
+        self._attr_speed_count = self._profile.speed_count
+        self._attr_preset_modes = list(self._profile.modes.values())
         self._attr_supported_features = (
             FanEntityFeature.SET_SPEED | FanEntityFeature.PRESET_MODE
             | FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
         )
 
-    @staticmethod
-    def _pct_to_speed(percentage: int) -> int:
-        """Convert HA percentage (0-100) to device speed level (1-10)."""
-        return max(1, min(10, round(percentage / 10)))
+    def _pct_to_speed(self, percentage: int) -> int:
+        """Convert HA percentage (0-100) to device speed level (1..speed_count)."""
+        n = self._profile.speed_count
+        return max(1, min(n, round(percentage * n / 100)))
 
     @property
     def is_on(self) -> bool:
@@ -41,7 +44,7 @@ class DreameFan(DreameEntity, FanEntity):
 
     @property
     def percentage(self) -> int | None:
-        if not self._purifier.is_on or self._purifier.mode_value != MODE_CUSTOM:
+        if not self._purifier.is_on or self._purifier.mode_value != self._profile.manual_mode:
             return None
         return self._purifier.fan_speed_percent
 
@@ -54,7 +57,12 @@ class DreameFan(DreameEntity, FanEntity):
         return {"fan_speed_level": self._purifier.fan_speed}
 
     async def async_turn_on(self, percentage=None, preset_mode=None, **kwargs) -> None:
-        mode = MODE_NAME_TO_VALUE.get(preset_mode, MODE_CUSTOM if percentage else MODE_AUTO)
+        if preset_mode is not None:
+            mode = self._profile.mode_by_name.get(preset_mode)
+        elif percentage:
+            mode = self._profile.manual_mode
+        else:
+            mode = None  # just switch on, keeping whatever mode it was in
         await self._purifier.turn_on(mode)
         if percentage:
             await self._purifier.set_fan_speed(self._pct_to_speed(percentage))
@@ -68,13 +76,13 @@ class DreameFan(DreameEntity, FanEntity):
         if percentage == 0:
             await self.async_turn_off()
             return
-        if self._purifier.mode_value != MODE_CUSTOM:
-            await self._purifier.set_mode(MODE_CUSTOM)
+        if self._purifier.mode_value != self._profile.manual_mode:
+            await self._purifier.set_mode(self._profile.manual_mode)
         await self._purifier.set_fan_speed(self._pct_to_speed(percentage))
         await self.coordinator.async_request_refresh()
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
-        mode_value = MODE_NAME_TO_VALUE.get(preset_mode)
+        mode_value = self._profile.mode_by_name.get(preset_mode)
         if mode_value is not None:
             await self._purifier.set_mode(mode_value)
             await self.coordinator.async_request_refresh()

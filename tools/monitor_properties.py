@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from known_props import load_known_props, unsafe_for  # noqa: E402
+from known_props import load_known_props, request_id, unsafe_for  # noqa: E402
 
 DREAME_SALT = "RAylYC%fmSKp7%Tq"
 DREAME_USER_AGENT = "Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)"
@@ -98,10 +98,11 @@ class DreameMonitor:
     def get_properties(self, did, props, host=None):
         host_prefix = f"-{host.split('.')[0]}" if host else ""
         params = [{"did": str(did), "siid": s, "piid": p} for s, p in props]
+        rid = request_id()
         payload = {
             "did": str(did),
-            "id": 1,
-            "data": {"did": str(did), "id": 1, "method": "get_properties", "params": params},
+            "id": rid,
+            "data": {"did": str(did), "id": rid, "method": "get_properties", "params": params},
         }
         try:
             r = self._session.post(
@@ -272,10 +273,9 @@ def main():
     host = dev.get("bindDomain")
     print(f"{GREEN}✅ Found: {dev.get('customName', '?')} ({dev.get('model', '?')}){RESET}")
 
-    # Labels from the integration's property map
-    labels = load_known_props()
-
     model = dev.get("model", "?")
+    # Labels from the integration's property map for this model
+    labels = load_known_props(model)
     unsafe = unsafe_for(model)
     if unsafe:
         print(f"{YELLOW}Never reading on {model} (known to crash it): "

@@ -24,6 +24,10 @@ import json
 import requests
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from known_props import request_id  # noqa: E402
 
 DREAME_SALT = "RAylYC%fmSKp7%Tq"
 DREAME_USER_AGENT = "Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)"
@@ -96,10 +100,11 @@ class DreameClient:
 
     def _send(self, did, method, params, host=None):
         host_prefix = f"-{host.split('.')[0]}" if host else ""
+        rid = request_id()
         payload = {
             "did": str(did),
-            "id": 1,
-            "data": {"did": str(did), "id": 1, "method": method, "params": params},
+            "id": rid,
+            "data": {"did": str(did), "id": rid, "method": method, "params": params},
         }
         r = self._session.post(
             f"{self.api_url}/dreame-iot-com{host_prefix}/device/sendCommand",
@@ -233,7 +238,7 @@ Examples:
             data = result.get("data", {})
             if "result" in data and isinstance(data["result"], list):
                 for prop in data["result"]:
-                    if prop.get("code", -1) == 0:
+                    if prop.get("code", -1) == 0 and (prop.get("siid"), prop.get("piid")) == (args.siid, args.piid):
                         print(f"\n{GREEN}Value: {prop['value']!r} ({type(prop['value']).__name__}){RESET}")
 
     else:
@@ -246,7 +251,7 @@ Examples:
             data = before.get("data", {})
             if "result" in data and isinstance(data["result"], list):
                 for prop in data["result"]:
-                    if prop.get("code", -1) == 0:
+                    if prop.get("code", -1) == 0 and (prop.get("siid"), prop.get("piid")) == (args.siid, args.piid):
                         old_val = prop["value"]
 
         print(f"  Current: {old_val!r}")
@@ -263,7 +268,7 @@ Examples:
             data = result.get("data", {})
             if "result" in data and isinstance(data["result"], list):
                 for prop in data["result"]:
-                    if prop.get("code", -1) == 0:
+                    if prop.get("code", -1) == 0 and (prop.get("siid"), prop.get("piid")) == (args.siid, args.piid):
                         success = True
 
         if success:
@@ -276,7 +281,7 @@ Examples:
                 data = after.get("data", {})
                 if "result" in data and isinstance(data["result"], list):
                     for prop in data["result"]:
-                        if prop.get("code", -1) == 0:
+                        if prop.get("code", -1) == 0 and (prop.get("siid"), prop.get("piid")) == (args.siid, args.piid):
                             print(f"{GREEN}   Verified: {prop['value']!r}{RESET}")
         else:
             print(f"\n{RED}❌ Set may have failed. Check result above.{RESET}")

@@ -11,24 +11,41 @@ INTEGRATION_API = INTEGRATION_DIR / "api.py"
 INTEGRATION_CONST = INTEGRATION_DIR / "const.py"
 
 
-def load_known_props(path: Path = INTEGRATION_API) -> dict:
-    """Return {(siid, piid): attr_name} for every PropDef in the integration."""
-    known = {}
+def _propdef_table(node) -> dict:
+    """{(siid, piid): attr} from a tuple literal of PropDef(...) calls."""
+    out = {}
+    for call in getattr(node, "elts", []):
+        if (
+            isinstance(call, ast.Call)
+            and getattr(call.func, "id", None) == "PropDef"
+            and len(call.args) >= 3
+            and all(isinstance(a, ast.Constant) for a in call.args[:3])
+        ):
+            attr, siid, piid = (a.value for a in call.args[:3])
+            out[(siid, piid)] = attr
+    return out
+
+
+def load_known_props(model: str | None = None, path: Path = INTEGRATION_API) -> dict:
+    """Return {(siid, piid): attr_name} from the integration's api.py: the model's own
+    table if MODEL_PROP_DEFS lists it (e.g. the TP20), otherwise PROP_DEFS."""
     try:
         tree = ast.parse(path.read_text())
     except (OSError, SyntaxError) as ex:
         print(f"⚠️  Could not read integration property map from {path}: {ex}")
-        return known
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and getattr(node.func, "id", None) == "PropDef"
-            and len(node.args) >= 3
-            and all(isinstance(a, ast.Constant) for a in node.args[:3])
-        ):
-            attr, siid, piid = (a.value for a in node.args[:3])
-            known[(siid, piid)] = attr
-    return known
+        return {}
+    tables, model_tables = {}, {}
+    for node in tree.body:
+        target = getattr(node, "target", None) or (node.targets[0] if isinstance(node, ast.Assign) else None)
+        name = getattr(target, "id", None)
+        if name == "MODEL_PROP_DEFS" and isinstance(node.value, ast.Dict):
+            for k, v in zip(node.value.keys, node.value.values):
+                model_tables[ast.literal_eval(k)] = getattr(v, "id", None)
+        elif name and isinstance(node.value, ast.Tuple):
+            table = _propdef_table(node.value)
+            if table:
+                tables[name] = table
+    return tables.get(model_tables.get(model), tables.get("PROP_DEFS", {}))
 
 
 def load_unsafe_props(path: Path = INTEGRATION_CONST) -> dict:
@@ -54,3 +71,16 @@ def load_unsafe_props(path: Path = INTEGRATION_CONST) -> dict:
 
 def unsafe_for(model: str) -> set:
     return load_unsafe_props().get(model, set())
+
+
+_ids = None
+
+
+def request_id() -> int:
+    """A fresh id for each cloud request. A fixed id let replies get mixed up between
+    clients talking to the device at the same time (this script, HA, the app)."""
+    global _ids
+    if _ids is None:
+        import itertools, random
+        _ids = itertools.count(random.randint(1000, 1_000_000))
+    return next(_ids)

@@ -42,6 +42,7 @@ SENSORS: tuple[SensorSpec, ...] = (
     SensorSpec("tvoc", "tvoc", SensorDeviceClass.VOLATILE_ORGANIC_COMPOUNDS, _M, _UG),
     SensorSpec("air_quality", "air_quality_level", icon="mdi:air-filter"),
     SensorSpec("aq_percent", "aq_percent", state_class=_M, unit=PERCENTAGE, icon="mdi:air-filter"),
+    SensorSpec("fan_level", "fan_level", state_class=_M, icon="mdi:fan"),
     SensorSpec("hepa_life", "hepa_life", state_class=_M, unit=PERCENTAGE, icon="mdi:air-filter", category=_D),
     SensorSpec("hepa_used", "hepa_hours_used", state_class=_T, unit=UnitOfTime.HOURS, icon="mdi:clock-outline", category=_D),
     SensorSpec("hepa_days", "hepa_days_total", unit=UnitOfTime.DAYS, icon="mdi:calendar-clock", category=_D),
@@ -71,10 +72,18 @@ class DreameSensor(DreameEntity, SensorEntity):
             self._attr_suggested_display_precision = spec.precision
         if spec.category is not None:
             self._attr_entity_category = spec.category
+        # Named levels (e.g. the TP20's Excellent..Bad) instead of a bare number
+        self._levels = purifier.profile.aq_levels if spec.attr == "air_quality_level" else None
+        if self._levels:
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_state_class = None
+            self._attr_options = list(self._levels.values())
 
     @property
     def native_value(self):
         v = getattr(self._purifier, self._spec.attr)
         if v is None:
             return None
+        if self._levels:
+            return self._levels.get(v)
         return v * self._spec.scale if self._spec.scale != 1 else v
