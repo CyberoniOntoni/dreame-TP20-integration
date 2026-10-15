@@ -35,7 +35,7 @@ DREAME_TENANT_ID = "000000"
 
 # ─── Properties the integration already maps ──────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from known_props import INTEGRATION_API, load_known_props  # noqa: E402
+from known_props import INTEGRATION_API, load_known_props, unsafe_for  # noqa: E402
 
 KNOWN = load_known_props()
 
@@ -177,7 +177,7 @@ def find_purifier(devices: list) -> dict | None:
     return purifiers[0]
 
 
-def probe_all_properties(prober: DreameCloudProber, did: str, host: str):
+def probe_all_properties(prober: DreameCloudProber, did: str, host: str, skip=()):
     """
     Systematically probe siid 1-20, piid 1-20 to discover all readable properties.
     This covers the standard MiOT service range for most Dreame devices.
@@ -191,7 +191,7 @@ def probe_all_properties(prober: DreameCloudProber, did: str, host: str):
 
     # Probe in batches of 10 to avoid timeouts
     for siid in range(1, 21):
-        batch = [(siid, piid) for piid in range(1, 21)]
+        batch = [(siid, piid) for piid in range(1, 21) if (siid, piid) not in skip]
 
         # Split into sub-batches of 10
         for i in range(0, len(batch), 10):
@@ -231,7 +231,7 @@ def probe_all_properties(prober: DreameCloudProber, did: str, host: str):
     return all_results
 
 
-def probe_extended_properties(prober: DreameCloudProber, did: str, host: str):
+def probe_extended_properties(prober: DreameCloudProber, did: str, host: str, skip=()):
     """
     Extended scan for higher siid values (21-40) and higher piid values (21-30).
     Some Dreame devices put custom/vendor-specific services at higher siid values.
@@ -243,7 +243,7 @@ def probe_extended_properties(prober: DreameCloudProber, did: str, host: str):
     extended_results = {}
 
     for siid in range(21, 41):
-        batch = [(siid, piid) for piid in range(1, 16)]
+        batch = [(siid, piid) for piid in range(1, 16) if (siid, piid) not in skip]
         for i in range(0, len(batch), 10):
             sub_batch = batch[i : i + 10]
             result = prober.get_properties_batch(did, sub_batch, host)
@@ -498,6 +498,9 @@ def main():
                         help="Also scan siid 21-40 (vendor-specific services)")
     parser.add_argument("--json", "-j", action="store_true",
                         help="Also output raw JSON data")
+    parser.add_argument("--force", action="store_true",
+                        help="Run the batched scan even on models known to crash on some reads "
+                             "(unsafe properties are still skipped)")
     args = parser.parse_args()
 
     log.info("Integration property map: %d known properties from %s", len(KNOWN), INTEGRATION_API)
@@ -541,13 +544,26 @@ def main():
 
     log.info("\n✅ Found purifier: %s (%s) did=%s host=%s", name, model, did, host)
 
+    unsafe = unsafe_for(model)
+    if unsafe:
+        log.warning(
+            "\n⚠️  %s is known to crash when some properties are read (%s).\n"
+            "   This script fires hundreds of batched reads, which risks more crashes.\n"
+            "   Safer: python tools/safe_probe.py -u EMAIL -p PASS --country %s --scan --delay 5\n"
+            "   (reads one property at a time and stops at the first problem)",
+            model, ", ".join(f"{s}.{p}" for s, p in sorted(unsafe)), args.country,
+        )
+        if not args.force:
+            log.error("   Stopping. Re-run with --force to scan anyway (those properties are still skipped).")
+            sys.exit(1)
+
     # ── Step 4: Probe all properties ─────────────────────────────────────
     log.info("\nStep 3: Probing ALL properties (this takes ~30 seconds)...")
-    standard_props = probe_all_properties(prober, did, host)
+    standard_props = probe_all_properties(prober, did, host, skip=unsafe)
 
     extended_props = {}
     if args.extended:
-        extended_props = probe_extended_properties(prober, did, host)
+        extended_props = probe_extended_properties(prober, did, host, skip=unsafe)
 
     # ── Step 5: Read fan speed and mode ──────────────────────────────────
     # Try to detect fan speed and mode properties

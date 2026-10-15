@@ -25,7 +25,13 @@ Usage:
     # Step 2 (only if every single read was fine): batched reads like the integration
     python3 tools/safe_probe.py -u EMAIL -p 'PASSWORD' --country sg --batch 5
 
-The device's ID and MAC are never printed.
+    # Look for properties the integration doesn't know: every siid/piid in a range,
+    # one at a time (here siid 1-8, piid 1-20, 5 s apart)
+    python3 tools/safe_probe.py -u EMAIL -p 'PASSWORD' --country sg --scan --siids 1-8 --piids 1-20 --delay 5
+
+Properties listed for the model in UNSAFE_PROPS (custom_components/dreame_airpurifier/const.py)
+are always skipped. The device's ID and MAC are never printed, but scanned values can
+include things like the device's time zone or location, so check before sharing.
 """
 
 import argparse
@@ -35,7 +41,7 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from known_props import load_known_props  # noqa: E402
+from known_props import load_known_props, unsafe_for  # noqa: E402
 from set_property import DreameClient, GREEN, RED, YELLOW, CYAN, BOLD, RESET  # noqa: E402
 
 HEALTH_PROP = (2, 1)  # power — a single read of this is known to be safe
@@ -92,7 +98,19 @@ def main():
     parser.add_argument("--start", default=None, help="Resume from this property, e.g. 3.5")
     parser.add_argument("--batch", type=int, default=1, help="Properties per request (default 1)")
     parser.add_argument("--skip", default="", help="Comma-separated properties to leave out, e.g. 3.10,6.2")
+    parser.add_argument("--scan", action="store_true",
+                        help="Probe every siid/piid in --siids x --piids instead of the integration's known properties")
+    parser.add_argument("--siids", default="1-8", help="siid range for --scan (default 1-8)")
+    parser.add_argument("--piids", default="1-20", help="piid range for --scan (default 1-20)")
     args = parser.parse_args()
+
+    def parse_range(text):
+        try:
+            lo, _, hi = text.partition("-")
+            lo, hi = int(lo), int(hi or lo)
+            return range(lo, hi + 1)
+        except ValueError:
+            parser.error(f"{text!r} should look like 1-8")
 
     def parse_key(text):
         try:
@@ -102,14 +120,14 @@ def main():
             parser.error(f"{text!r} should look like 3.10")
 
     known = load_known_props()
-    if not known:
+    if not known and not args.scan:
         print(f"{RED}❌ Could not load the integration's property list{RESET}")
         sys.exit(1)
+
+    def label_of(k):
+        return known.get(k, "?")
+
     skip = {parse_key(t) for t in args.skip.split(",") if t.strip()}
-    keys = [k for k in sorted(known) if k not in skip]
-    if args.start:
-        start = parse_key(args.start)
-        keys = [k for k in keys if k >= start]
 
     client = DreameClient(args.username, args.password, args.country)
     if not client.login():
@@ -121,7 +139,22 @@ def main():
         sys.exit(1)
     dev = purifiers[0]
     did, host = str(dev["did"]), dev.get("bindDomain")
-    print(f"{GREEN}✅ Device: {dev.get('customName') or '?'} ({dev.get('model', '?')}){RESET}")
+    model = dev.get("model", "?")
+    print(f"{GREEN}✅ Device: {dev.get('customName') or '?'} ({model}){RESET}")
+
+    unsafe = unsafe_for(model)
+    if unsafe:
+        print(f"{YELLOW}Always skipping for {model} (known to crash it): "
+              f"{', '.join(f'{s}.{p}' for s, p in sorted(unsafe))}{RESET}")
+    skip |= unsafe
+    if args.scan:
+        candidates = [(s, p) for s in parse_range(args.siids) for p in parse_range(args.piids)]
+    else:
+        candidates = sorted(known)
+    keys = [k for k in candidates if k not in skip]
+    if args.start:
+        start = parse_key(args.start)
+        keys = [k for k in keys if k >= start]
 
     batches = [keys[i:i + args.batch] for i in range(0, len(keys), args.batch)]
     print(f"{BOLD}Reading {len(keys)} properties, {args.batch} per request, {args.delay}s apart. Reads only.{RESET}")
@@ -133,7 +166,7 @@ def main():
 
     results = {}
     for batch in batches:
-        label = ", ".join(f"{s}.{p} {known[(s, p)]}" for s, p in batch)
+        label = ", ".join(f"{s}.{p} {label_of((s, p))}" for s, p in batch)
         print(f"{CYAN}{ts()}  reading {label}{RESET}")
         res, err = read_props(client, did, host, batch)
         if err:
@@ -144,9 +177,9 @@ def main():
             code, value = res.get(k, (None, None))
             results[k] = (code, value)
             if code == 0:
-                print(f"  {GREEN}{k[0]}.{k[1]} {known[k]} = {value!r}{RESET}")
+                print(f"  {GREEN}{k[0]}.{k[1]} {label_of(k)} = {value!r}{RESET}")
             elif code is not None:
-                print(f"  {YELLOW}{k[0]}.{k[1]} {known[k]}: code {code} (device doesn't have it?){RESET}")
+                print(f"  {YELLOW}{k[0]}.{k[1]} {label_of(k)}: code {code} (device doesn't have it?){RESET}")
 
         if args.confirm:
             input("  Purifier still OK? Press Enter to continue, Ctrl+C to stop. ")
@@ -160,22 +193,26 @@ def main():
             print(f"\n{RED}{BOLD}⛔ Device {what}: {label}{back}{RESET}")
             print(f"{RED}   Likely trigger. Once the device is back, skip it and carry on with:{RESET}")
             later = [k for k in keys if k > batch[-1]]
-            skip_arg = ",".join(f"{s}.{p}" for s, p in sorted(skip | set(batch)))
+            skip_arg = ",".join(f"{s}.{p}" for s, p in sorted((skip - unsafe) | set(batch)))
+            scan_arg = f" --scan --siids {args.siids} --piids {args.piids}" if args.scan else ""
             if later:
-                print(f"   python {sys.argv[0]} -u EMAIL -p 'PASSWORD' --country {args.country} --skip {skip_arg} --start {later[0][0]}.{later[0][1]}")
+                print(f"   python {sys.argv[0]} -u EMAIL -p 'PASSWORD' --country {args.country}{scan_arg} --skip {skip_arg} --start {later[0][0]}.{later[0][1]}")
+            print(f"{RED}   Please report it so it can be added to UNSAFE_PROPS for {model}.{RESET}")
             if len(batch) > 1:
                 print(f"   (that request had {len(batch)} properties; re-run with --batch 1 to find which one)")
             break
     else:
         print(f"\n{GREEN}{BOLD}✅ Device kept answering through every read.{RESET}")
 
-    print(f"\n{BOLD}Summary{RESET} (share this — it has no device ID or MAC)")
+    print(f"\n{BOLD}Summary{RESET} (no device ID or MAC; in --scan mode, check values for location/time zone before sharing)")
     for k in keys:
         if k not in results:
             continue
         code, value = results[k]
+        if args.scan and code not in (0, None):
+            continue  # in a scan, only show properties that exist (or didn't answer)
         status = f"= {value!r}" if code == 0 else ("no answer" if code is None else f"code {code}")
-        print(f"  {k[0]:>2}.{k[1]:<2}  {known[k]:<24} {status}")
+        print(f"  {k[0]:>2}.{k[1]:<2}  {label_of(k):<24} {status}")
 
 
 if __name__ == "__main__":
