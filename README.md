@@ -56,6 +56,8 @@ What you get depends on what your model reports. Features it doesn't have are no
    python3 tools/discover_properties.py -u <email> -p <password> --country <region>
    ```
    `tools/monitor_properties.py` watches values change live while you use the app, and `tools/set_property.py` writes a single property. `re.txt` has the PM10 map as a reference.
+
+   If polling makes your purifier misbehave (e.g. reboot), use `tools/safe_probe.py` first: it reads one property at a time, checks the device is still answering after each, and stops at the first one that causes trouble.
 4. Update `PROP_DEFS` in `custom_components/dreame_airpurifier/api.py`.
 
 The same property list is logged once at startup at INFO level. To see it:
