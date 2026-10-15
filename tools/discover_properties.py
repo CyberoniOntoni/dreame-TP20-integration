@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Dreame PM10 (dreame.airp.cvf24a) — MiOT Property Discovery & Reverse Engineering Tool
+Dreame air purifier — MiOT Property Discovery & Reverse Engineering Tool
 
-This script connects to the Dreame Cloud API, finds your PM10 air purifier,
+Works with any Dreame purifier on the Dreame Home app (PM10, TP20, ...). If the
+account has several, the PM10 (dreame.airp.cvf24a) is preferred.
+
+This script connects to the Dreame Cloud API, finds your air purifier,
 and systematically probes ALL possible siid/piid combinations to discover
 the full property map. It also tests known actions.
 
 Usage:
-    python3 tools/discover_pm10.py --username YOUR_EMAIL --password YOUR_PASSWORD [--country us]
+    python3 tools/discover_properties.py --username YOUR_EMAIL --password YOUR_PASSWORD [--country us]
 
 The output is a full report of every readable property on the device,
-which you can use to update api.py for PM10 support.
+which you can use to update PROP_DEFS in api.py for your model.
 """
 
 import argparse
@@ -394,7 +397,8 @@ def generate_report(
 
     report = []
     report.append("=" * 70)
-    report.append(f"  DREAME PM10 PROPERTY DISCOVERY REPORT")
+    report.append(f"  DREAME AIR PURIFIER PROPERTY DISCOVERY REPORT")
+    report.append(f"  Model: {device_info.get('model', '?')}")
     report.append(f"  Generated: {datetime.now().isoformat()}")
     report.append("=" * 70)
     report.append("")
@@ -448,15 +452,15 @@ def generate_report(
     report.append("  SUGGESTED api.py PROPERTY MAP UPDATE")
     report.append("-" * 70)
     report.append("""
-# === MiOT Property Map for dreame.airp.cvf24a (Dreame PM10) ===
-# DISCOVERED by discover_pm10.py on {date}
+# === MiOT Property Map for {model} ===
+# DISCOVERED by discover_properties.py on {date}
 #
 # TODO: Label each property after testing with the Dreamehome app.
 # Workflow:
 #   1. Change a setting in the app (e.g., switch to Pet mode)
 #   2. Re-run this script to see which property value changed
 #   3. Update the labels below
-""".format(date=datetime.now().strftime("%Y-%m-%d")))
+""".format(model=device_info.get("model", "?"), date=datetime.now().strftime("%Y-%m-%d")))
 
     for (siid, piid) in sorted(all_props.keys()):
         info = all_props[(siid, piid)]
@@ -515,7 +519,7 @@ def interactive_mode_discovery(prober, did, host, mode_prop):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Dreame PM10 MiOT Property Discovery Tool",
+        description="Dreame air purifier MiOT Property Discovery Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=PM10_NOTES,
     )
@@ -523,7 +527,7 @@ def main():
     parser.add_argument("--password", "-p", required=True, help="Dreame account password")
     parser.add_argument("--country", "-c", default="us", choices=["us", "cn", "eu", "sg", "kr"],
                         help="Country/region (default: us)")
-    parser.add_argument("--output", "-o", default="tools/pm10_discovery_report.txt",
+    parser.add_argument("--output", "-o", default="tools/discovery_report.txt",
                         help="Output report file path")
     parser.add_argument("--interactive", "-i", action="store_true",
                         help="Enable interactive mode discovery (switch modes in app)")
@@ -647,7 +651,7 @@ def main():
   2. For UNKNOWN properties, use the Dreamehome app to toggle settings
      one at a time, then re-run this script to see which value changed.
   3. To discover mode values specifically, run with --interactive:
-       python3 tools/discover_pm10.py -u EMAIL -p PASS --interactive
+       python3 tools/discover_properties.py -u EMAIL -p PASS --interactive
   4. Once you have the full property map, update api.py:
      - Change fan speed range from 1-5 to 1-10
      - Update mode constants (AI/Comfort/Pet)
