@@ -1,4 +1,4 @@
-"""Config flow for AirPursue PM10 Air Purifier."""
+"""Config flow for Dreame Air Purifier."""
 from __future__ import annotations
 
 import logging
@@ -35,7 +35,7 @@ class DreameAirPurifierConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 purifiers = await api.get_purifiers()
                 if purifiers:
                     return self.async_create_entry(
-                        title=f"AirPursue PM10 ({user_input[CONF_USERNAME]})",
+                        title=f"Dreame Air Purifier ({user_input[CONF_USERNAME]})",
                         data=user_input,
                     )
                 errors["base"] = "no_devices"

@@ -1,4 +1,4 @@
-"""Select platform for AirPursue PM10."""
+"""Select platform for Dreame Air Purifier."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,7 +30,7 @@ SELECTS: tuple[SelectSpec, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(DreameSelect(data["coordinator"], p, spec) for p in data["purifiers"] for spec in SELECTS)
+    async_add_entities(DreameSelect(data["coordinator"], p, spec) for p in data["purifiers"] for spec in SELECTS if p.supports(spec.attr))
 
 
 class DreameSelect(DreameEntity, SelectEntity):

@@ -1,4 +1,4 @@
-"""Base entity for AirPursue PM10."""
+"""Base entity for Dreame Air Purifier."""
 from __future__ import annotations
 
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -9,7 +9,7 @@ from .const import DOMAIN
 
 
 class DreameEntity(CoordinatorEntity):
-    """Common base for all AirPursue PM10 entities."""
+    """Common base for all Dreame Air Purifier entities."""
 
     _attr_has_entity_name = True
 

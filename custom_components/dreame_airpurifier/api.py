@@ -1,4 +1,4 @@
-"""AirPursue PM10 Cloud API Client — fully async with data-driven property registry."""
+"""Dreame air purifier Cloud API Client — fully async with data-driven property registry."""
 from __future__ import annotations
 
 import hashlib
@@ -207,14 +207,17 @@ class DreameCloudAPI:
 
     # ── High-level operations ───────────────────────────────────────────
 
-    async def get_properties(self, did: str, prop_defs: tuple[PropDef, ...], host: str | None = None) -> dict[tuple[int, int], Any]:
+    async def get_properties(self, did: str, prop_defs: tuple[PropDef, ...], host: str | None = None) -> dict[tuple[int, int], Any] | None:
+        """Read properties. Returns None if the request itself failed, so callers can
+        tell a failed request apart from a device that doesn't have these properties."""
         params = [{"did": did, "siid": p.siid, "piid": p.piid} for p in prop_defs]
         result = await self.send_command(did, "get_properties", params, host)
+        if not isinstance(result, list):
+            return None
         values: dict[tuple[int, int], Any] = {}
-        if result and isinstance(result, list):
-            for prop in result:
-                if prop.get("code", -1) == 0:
-                    values[(prop["siid"], prop["piid"])] = prop.get("value")
+        for prop in result:
+            if prop.get("code", -1) == 0:
+                values[(prop["siid"], prop["piid"])] = prop.get("value")
         return values
 
     async def set_property(self, did: str, siid: int, piid: int, value: Any, host: str | None = None) -> bool:
@@ -254,13 +257,13 @@ class DreameCloudAPI:
 
 
 class DreameAirPurifier:
-    """AirPursue PM10 device backed by a data-driven property registry.
+    """Dreame air purifier backed by a data-driven property registry.
 
     All properties defined in PROP_DEFS are accessible as attributes via __getattr__.
     Derived properties (is_on, mode, fan_speed_percent, auto_fan) are explicit.
     """
 
-    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available")
+    __slots__ = ("_api", "_did", "_host", "_model", "_mac", "_name", "_state", "_available", "_supported", "_detected", "_partial", "_raw")
 
     def __init__(self, api: DreameCloudAPI, device_info: dict):
         self._api = api
@@ -270,10 +273,20 @@ class DreameAirPurifier:
         self._mac: str = device_info.get("mac", "")
         self._name: str = (
             device_info.get("customName")
-            or device_info.get("deviceInfo", {}).get("displayName", "AirPursue PM10")
+            or device_info.get("deviceInfo", {}).get("displayName", "Dreame Air Purifier")
         )
         self._state: dict[str, Any] = {p.attr: p.default for p in PROP_DEFS}
         self._available = True
+        # Attributes the device has actually reported (code 0, non-null value).
+        # Used to skip creating entities for properties a model doesn't have.
+        self._supported: set[str] = set()
+        # True once a poll has completed with every batch answering, i.e. the
+        # supported set is trustworthy enough to decide which entities to create.
+        self._detected = False
+        # True if the last poll before detection got only some batches back.
+        self._partial = False
+        # Last raw value seen per (siid, piid), for diagnostics.
+        self._raw: dict[tuple[int, int], Any] = {}
 
     def __getattr__(self, name: str) -> Any:
         """Fall-through to _state dict for registry-managed attributes."""
@@ -327,23 +340,66 @@ class DreameAirPurifier:
     def auto_fan(self) -> bool:
         return self._state["auto_fan_raw"] == 0
 
+    def supports(self, attr: str) -> bool:
+        """True if the device has reported a value for this registry attribute."""
+        return attr in self._supported
+
+    @property
+    def detection_incomplete(self) -> bool:
+        """True if the device answered but some poll batches failed before detection."""
+        return not self._detected and self._partial
+
+    @property
+    def supported_attrs(self) -> list[str]:
+        return sorted(self._supported)
+
+    @property
+    def unsupported_attrs(self) -> list[str]:
+        return sorted(p.attr for p in PROP_DEFS if p.attr not in self._supported)
+
+    @property
+    def raw_properties(self) -> dict[str, Any]:
+        """Last raw value per property, keyed "siid.piid"."""
+        return {f"{s}.{pi}": v for (s, pi), v in sorted(self._raw.items())}
+
     # ── Polling ─────────────────────────────────────────────────────────
 
     async def update(self) -> bool:
         all_values: dict[tuple[int, int], Any] = {}
+        failed = False
         for batch in _POLL_BATCHES:
             values = await self._api.get_properties(self._did, batch, self._host)
-            if values:
+            if values is None:
+                failed = True
+            else:
                 all_values.update(values)
         if not all_values:
             self._available = False
             return False
+        if failed and not self._detected:
+            # A failed batch would look like "device lacks these properties" and
+            # permanently hide their entities, so don't trust a partial first poll.
+            self._partial = True
+            self._available = False
+            _LOGGER.warning("%s: partial response while detecting properties, will retry", self._name)
+            return False
+        self._partial = False
         self._available = True
+        self._raw.update(all_values)
         for p in PROP_DEFS:
-            raw = all_values.get((p.siid, p.piid), p.default)
-            if raw is None:
-                raw = p.default
-            self._state[p.attr] = p.coerce(raw) if p.coerce else raw
+            raw = all_values.get((p.siid, p.piid))
+            if raw is not None:
+                self._supported.add(p.attr)
+                self._state[p.attr] = p.coerce(raw) if p.coerce else raw
+            elif p.attr not in self._supported:
+                self._state[p.attr] = p.coerce(p.default) if p.coerce else p.default
+            # else: supported but missing this poll (e.g. a batch failed) -> keep last value
+        if not self._detected:
+            self._detected = True
+            _LOGGER.info(
+                "%s (%s) reported properties: %s; not reported: %s",
+                self._name, self._model, self.raw_properties, self.unsupported_attrs,
+            )
         return True
 
     # ── Commands ────────────────────────────────────────────────────────

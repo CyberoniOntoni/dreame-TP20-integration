@@ -1,6 +1,6 @@
 {
   "domain": "dreame_airpurifier",
-  "name": "AirPursue PM10 Air Purifier",
+  "name": "Dreame Air Purifier",
   "codeowners": ["@codycyr"],
   "config_flow": true,
   "dependencies": [],

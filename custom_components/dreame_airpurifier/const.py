@@ -1,4 +1,4 @@
-"""Constants for AirPursue PM10 Air Purifier integration."""
+"""Constants for Dreame Air Purifier integration."""
 
 DOMAIN = "dreame_airpurifier"
 SCAN_INTERVAL = 30

@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "AirPursue PM10 Air Purifier",
+        "title": "Dreame Air Purifier",
         "description": "Enter your Dreamehome app credentials.",
         "data": {
           "username": "Email or Phone",
@@ -11,7 +11,7 @@
         }
       },
       "reauth_confirm": {
-        "title": "Re-authenticate AirPursue PM10",
+        "title": "Re-authenticate Dreame Air Purifier",
         "description": "Your credentials have expired. Please re-enter them.",
         "data": {
           "username": "Email or Phone",

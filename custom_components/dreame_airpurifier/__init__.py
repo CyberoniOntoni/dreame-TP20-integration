@@ -1,4 +1,4 @@
-"""AirPursue PM10 Air Purifier integration."""
+"""Dreame Air Purifier integration."""
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +8,7 @@ from datetime import timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_USERNAME, CONF_PASSWORD, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -51,6 +51,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         update_interval=timedelta(seconds=SCAN_INTERVAL),
     )
     await coordinator.async_config_entry_first_refresh()
+
+    # Entities are only created for properties a device reports, so don't set up
+    # from a poll where some requests failed: that would hide entities until reload.
+    incomplete = [p.name for p in purifiers if p.detection_incomplete]
+    if incomplete:
+        raise ConfigEntryNotReady(f"Incomplete property read from {', '.join(incomplete)}")
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
