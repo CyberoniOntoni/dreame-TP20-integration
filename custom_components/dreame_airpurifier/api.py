@@ -249,9 +249,10 @@ class DreameCloudAPI:
         for prop in result:
             key = (prop.get("siid"), prop.get("piid"))
             if key not in wanted:
-                # A reply meant for another request; don't let it set the wrong attribute.
-                _LOGGER.debug("Ignoring unrequested property %s in reply", key)
-                continue
+                # A reply meant for another request. Treat this request as failed rather
+                # than as "device has none of these", which would hide their entities.
+                _LOGGER.debug("Reply contained unrequested property %s; treating request as failed", key)
+                return None
             if prop.get("code", -1) == 0:
                 values[key] = prop.get("value")
         return values

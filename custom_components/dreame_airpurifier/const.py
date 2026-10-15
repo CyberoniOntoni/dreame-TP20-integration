@@ -40,7 +40,8 @@ class ModelProfile:
 DEFAULT_PROFILE = ModelProfile(modes=MODE_NAMES, manual_mode=MODE_CUSTOM, speed_count=10, timer_max=24)
 
 PROFILES: dict[str, ModelProfile] = {
-    # TP20: modes, speeds and timer confirmed by reading and writing them on the device.
+    # TP20: modes and speeds confirmed by reading and writing them on the device;
+    # 12 h is the longest timer the Dreame app offers (1 h and 2 h were written).
     "dreame.airp.u2630": ModelProfile(
         modes={0: "AI Purify", 2: "Sleep", 3: "Custom"}, manual_mode=3, speed_count=3, timer_max=12,
     ),
