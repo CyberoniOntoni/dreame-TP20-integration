@@ -63,26 +63,25 @@ class DreameFan(DreameEntity, FanEntity):
             mode = self._profile.manual_mode
         else:
             mode = None  # just switch on, keeping whatever mode it was in
-        await self._purifier.turn_on(mode)
+        steps = [self._purifier.turn_on(mode)]
         if percentage:
-            await self._purifier.set_fan_speed(self._pct_to_speed(percentage))
-        await self.coordinator.async_request_refresh()
+            steps.append(self._purifier.set_fan_speed(self._pct_to_speed(percentage)))
+        await self._write(*steps, action="turn on" + (f" in {preset_mode}" if preset_mode else ""))
 
     async def async_turn_off(self, **kwargs) -> None:
-        await self._purifier.turn_off()
-        await self.coordinator.async_request_refresh()
+        await self._write(self._purifier.turn_off(), action="turn off")
 
     async def async_set_percentage(self, percentage: int) -> None:
         if percentage == 0:
             await self.async_turn_off()
             return
+        steps = []
         if self._purifier.mode_value != self._profile.manual_mode:
-            await self._purifier.set_mode(self._profile.manual_mode)
-        await self._purifier.set_fan_speed(self._pct_to_speed(percentage))
-        await self.coordinator.async_request_refresh()
+            steps.append(self._purifier.set_mode(self._profile.manual_mode))
+        steps.append(self._purifier.set_fan_speed(self._pct_to_speed(percentage)))
+        await self._write(*steps, action=f"set the fan speed to {percentage}%")
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         mode_value = self._profile.mode_by_name.get(preset_mode)
         if mode_value is not None:
-            await self._purifier.set_mode(mode_value)
-            await self.coordinator.async_request_refresh()
+            await self._write(self._purifier.set_mode(mode_value), action=f"switch to {preset_mode}")

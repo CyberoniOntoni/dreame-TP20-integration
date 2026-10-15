@@ -1,6 +1,9 @@
 """Base entity for Dreame Air Purifier."""
 from __future__ import annotations
 
+from collections.abc import Awaitable
+
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -32,3 +35,17 @@ class DreameEntity(CoordinatorEntity):
     @property
     def available(self) -> bool:
         return self._purifier.available
+
+    async def _write(self, *steps: Awaitable[bool], action: str) -> None:
+        """Run commands in order, refresh, and show an error in HA if one wasn't
+        confirmed (stopping there, so e.g. a speed isn't sent after a failed mode change)."""
+        ok = True
+        for i, step in enumerate(steps):
+            if not await step:
+                ok = False
+                for rest in steps[i + 1:]:
+                    rest.close()  # never sent
+                break
+        await self.coordinator.async_request_refresh()
+        if not ok:
+            raise HomeAssistantError(f"{self._purifier.name}: couldn't {action}. The purifier didn't confirm the change.")

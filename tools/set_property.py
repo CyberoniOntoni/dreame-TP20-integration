@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from known_props import request_id  # noqa: E402
+from known_props import request_id, unsafe_for  # noqa: E402
 
 DREAME_SALT = "RAylYC%fmSKp7%Tq"
 DREAME_USER_AGENT = "Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)"
@@ -184,6 +184,8 @@ Examples:
                         help="Force value type (auto-detected by default)")
     parser.add_argument("--read", "-r", action="store_true", help="Read the property value")
     parser.add_argument("--action", "-a", action="store_true", help="Call an action (uses --siid/--aiid)")
+    parser.add_argument("--force", action="store_true",
+                        help="Read/write even a property known to crash this model (see UNSAFE_PROPS)")
     parser.add_argument("--action-params", default=None,
                         help="JSON array of action input params, e.g. '[1, 2]'")
     args = parser.parse_args()
@@ -217,6 +219,14 @@ Examples:
     did = str(dev["did"])
     host = dev.get("bindDomain")
     print(f"{GREEN}✅ Device: {dev.get('customName', '?')} ({dev.get('model', '?')}){RESET}\n")
+
+    # Reading (which a set also does first) some properties crashes some models.
+    if not args.action and (args.siid, args.piid) in unsafe_for(dev.get("model", "")):
+        print(f"{RED}❌ {args.siid}.{args.piid} is known to crash {dev.get('model')} when read "
+              f"(UNSAFE_PROPS in const.py). Not sending anything.{RESET}")
+        if not args.force:
+            print("   Re-run with --force if you really mean it.")
+            sys.exit(1)
 
     if args.action:
         # ── Call Action ──────────────────────────────────────────────

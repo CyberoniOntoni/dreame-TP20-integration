@@ -261,6 +261,11 @@ class DreameCloudAPI:
     async def set_property(self, did: str, siid: int, piid: int, value: Any, host: str | None = None) -> bool:
         params = [{"did": did, "siid": siid, "piid": piid, "value": value}]
         result = await self.send_command(did, "set_properties", params, host)
+        if isinstance(result, dict) and result.get("code") == 0:
+            # The cloud accepted it but the device didn't echo a per-property result
+            # (seen on the TP20, and the write did take effect). The integration only
+            # writes properties the model has, so treat it as accepted.
+            return True
         if not (isinstance(result, list) and result):
             return False
         first = result[0]
