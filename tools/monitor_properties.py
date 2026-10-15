@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dreame PM10 — Live Property Monitor / Diff Tool
+Dreame air purifier — Live Property Monitor / Diff Tool
 
 Continuously polls ALL discovered properties and highlights changes.
 This is the fastest way to figure out which siid/piid maps to which feature:
@@ -9,7 +9,7 @@ This is the fastest way to figure out which siid/piid maps to which feature:
   3. See which property value changed in the terminal
 
 Usage:
-    python3 tools/monitor_pm10.py --username EMAIL --password PASS [--interval 5]
+    python3 tools/monitor_properties.py --username EMAIL --password PASS [--interval 5]
 """
 
 import argparse
@@ -225,12 +225,12 @@ def print_diff(prev, curr, labels=None, ranges=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Dreame PM10 Live Property Monitor")
+    parser = argparse.ArgumentParser(description="Dreame air purifier Live Property Monitor")
     parser.add_argument("--username", "-u", required=True)
     parser.add_argument("--password", "-p", required=True)
     parser.add_argument("--country", "-c", default="us")
     parser.add_argument("--interval", "-i", type=int, default=5, help="Poll interval in seconds")
-    parser.add_argument("--log", "-l", default="tools/pm10_changes.log", help="Log file for changes")
+    parser.add_argument("--log", "-l", default="tools/property_changes.log", help="Log file for changes")
     parser.add_argument(
         "--ignore-siid", "-s",
         type=int, action="append", dest="ignore_siids", default=[], metavar="SIID",
@@ -240,7 +240,7 @@ def main():
     ignore_siids = set(args.ignore_siids)
 
     print(f"\n{BOLD}{CYAN}╔══════════════════════════════════════════════════════════╗{RESET}")
-    print(f"{BOLD}{CYAN}║   Dreame PM10 — Live Property Monitor                   ║{RESET}")
+    print(f"{BOLD}{CYAN}║   Dreame Purifier — Live Property Monitor               ║{RESET}")
     print(f"{BOLD}{CYAN}║   Change settings in the Dreamehome app to see diffs    ║{RESET}")
     print(f"{BOLD}{CYAN}╚══════════════════════════════════════════════════════════╝{RESET}\n")
 
