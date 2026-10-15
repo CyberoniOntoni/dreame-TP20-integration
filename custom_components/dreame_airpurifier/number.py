@@ -37,5 +37,4 @@ class DreameTimer(DreameEntity, NumberEntity):
         return self._purifier.timer
 
     async def async_set_native_value(self, value: float) -> None:
-        await self._purifier.set_timer(int(value))
-        await self.coordinator.async_request_refresh()
+        await self._write(self._purifier.set_timer(int(value)), action=f"set the timer to {int(value)} h")

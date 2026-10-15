@@ -50,7 +50,8 @@ class DreameSelect(DreameEntity, SelectEntity):
         return self._value_to_name.get(getattr(self._purifier, self._spec.attr))
 
     async def async_select_option(self, option: str) -> None:
+        steps = []
         if self._spec.key == "swivel":
-            await self._purifier.set_follow_mode(False)
-        await getattr(self._purifier, self._spec.setter)(self._spec.options[option])
-        await self.coordinator.async_request_refresh()
+            steps.append(self._purifier.set_follow_mode(False))
+        steps.append(getattr(self._purifier, self._spec.setter)(self._spec.options[option]))
+        await self._write(*steps, action=f"set {self._spec.key.replace('_', ' ')} to {option}")

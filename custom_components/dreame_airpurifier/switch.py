@@ -50,8 +50,10 @@ class DreameSwitch(DreameEntity, SwitchEntity):
         return getattr(self._purifier, self._spec.attr)
 
     async def _set(self, value: bool) -> None:
-        await getattr(self._purifier, self._spec.setter)(value)
-        await self.coordinator.async_request_refresh()
+        await self._write(
+            getattr(self._purifier, self._spec.setter)(value),
+            action=f"turn {self._spec.key.replace('_', ' ')} {'on' if value else 'off'}",
+        )
 
     async def async_turn_on(self, **kwargs) -> None:
         await self._set(True)
