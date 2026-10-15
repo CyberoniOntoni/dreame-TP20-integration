@@ -20,6 +20,10 @@ import requests
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from known_props import load_known_props  # noqa: E402
 
 DREAME_SALT = "RAylYC%fmSKp7%Tq"
 DREAME_USER_AGENT = "Dreame_Smarthome/2.1.9 (iPhone; iOS 18.4.1; Scale/3.00)"
@@ -273,23 +277,8 @@ def main():
     else:
         print(f"{GREEN}✅ Found {len(props)} readable properties{RESET}\n")
 
-    # Known labels from AP10
-    labels = {
-        (2, 1): "Power",
-        (2, 3): "Mode",
-        (2, 4): "Fan Speed",
-        (2, 5): "Fan %",
-        (2, 6): "Ionizer",
-        (3, 4): "AQ Level",
-        (3, 5): "PM2.5",
-        (4, 1): "Filter Life",
-        (4, 2): "Filter Days",
-        (4, 3): "Filter Used",
-        (6, 5): "LED",
-        (6, 6): "Buzzer",
-        (6, 7): "Child Lock",
-        (6, 8): "Light Mode",
-    }
+    # Labels from the integration's property map
+    labels = load_known_props()
 
     # Range tracker
     ranges = RangeTracker()
