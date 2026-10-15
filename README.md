@@ -1,6 +1,6 @@
 # Dreame Air Purifier for Home Assistant
 
-A custom Home Assistant integration for Dreame air purifiers that use the **Dreame Home app** (Dreame cloud). This fork is adding support for the **Dreame TP20**.
+A custom Home Assistant integration for Dreame air purifiers that use the **Dreame Home app** (Dreame cloud). It supports the **PM10** and the **TP20**.
 
 It talks to Dreame's cloud with your Dreame account and polls the purifier every 30 seconds. There is no local control.
 
@@ -8,10 +8,10 @@ It talks to Dreame's cloud with your Dreame account and polls the purifier every
 
 | Model | Status |
 |---|---|
-| PM10 | Works (upstream author's daily use) |
-| TP20 (`dreame.airp.u2630`) | Mapped from the device: fan with 3 speeds and AI Purify / Sleep / Custom presets, power, PM2.5, air quality, fan level, HEPA life, child lock, continuous monitoring, temperature unit, timer. Each was read and written on a real TP20 with the scripts in `tools/`; the integration's own controls haven't been tried in Home Assistant yet |
+| TP20 (`dreame.airp.u2630`) | Supported. Every property was mapped and read/written on a real TP20 |
+| PM10 (`dreame.airp.cvf24a`) | Supported (the upstream author's daily use) |
 | PM20 | Expected to work except heating |
-| Other `dreame.airp.*` models | May work partially. Entities are only created for properties the device reports |
+| Other `dreame.airp.*` models | May work partially. Entities are only created for properties the device reports. See [Adding a model](#adding-a-model) |
 
 Devices paired with Mi Home (Xiaomi cloud) are not supported.
 
@@ -22,6 +22,8 @@ Devices paired with Mi Home (Xiaomi cloud) are not supported.
 1. HACS → ⋮ → **Custom repositories**.
 2. Add `https://github.com/CyberoniOntoni/dreame-TP20-integration`, category **Integration**.
 3. Install **Dreame Air Purifier** and restart Home Assistant.
+
+HACS offers updates when a new [release](https://github.com/CyberoniOntoni/dreame-TP20-integration/releases) is published.
 
 ### Manual
 
@@ -39,42 +41,74 @@ Every purifier on the account is added.
 
 ## Entities
 
-What you get depends on what your model reports. Features it doesn't have are not created.
+Only entities for features your purifier actually has are created.
 
-- **Fan**: on/off, speed, preset modes (speeds and preset names depend on the model)
-- **Sensors**: PM2.5, PM10, PM1, TVOC, HCHO, temperature, humidity, air quality level and %, fan level, filter life and usage
-- **Switches**: continuous monitoring, child lock, human sensing, follow mode, voice assistant
-- **Selects**: swivel angle, temperature unit
-- **Number**: shutdown timer
+| | TP20 | PM10 |
+|---|---|---|
+| **Fan** | On/off, 3 speeds, presets **AI Purify** / **Sleep** / **Custom** | On/off, 10 speeds, presets Auto / Comfort / Custom / Pet |
+| **Sensors** | PM2.5, Air Quality Level (Excellent / Good / Moderate / Poor / Bad), Fan Level, HEPA Filter Life, HEPA Filter Days Left | PM2.5, PM10, PM1, TVOC, HCHO, temperature, humidity, air quality level and %, HEPA and carbon filter life and usage |
+| **Switches** | Child Lock, Continuous Monitoring (measures air quality while off) | Continuous Monitoring, Human Sensing, Follow Mode, Voice Assistant |
+| **Selects** | Temperature unit | Swivel angle, temperature unit |
+| **Number** | Timer (up to 12 h) | Timer (up to 24 h) |
 
-## Adding or mapping a model
+Setting a fan speed switches the purifier to its manual mode (Custom) first, since that's the only mode that accepts a speed. If the purifier doesn't confirm a change, Home Assistant shows an error instead of the control silently snapping back.
 
-1. Install the integration and add your account.
-2. Go to the device page → ⋮ → **Download diagnostics**. The file lists every raw property the device reported (`siid.piid`: value) and which known attributes are missing. It contains no credentials, device IDs or MACs.
-3. For properties outside the known map, scan everything with:
-   ```sh
-   python3 tools/discover_properties.py -u <email> -p <password> --country <region>
-   ```
-   `tools/monitor_properties.py` watches values change live while you use the app, and `tools/set_property.py` writes a single property. `re.txt` has the PM10 map as a reference.
+## Upgrading
 
-   If polling makes your purifier misbehave (e.g. reboot), use `tools/safe_probe.py` first: it reads one property at a time, checks the device is still answering after each, and stops at the first one that causes trouble. With `--scan --siids 1-8 --piids 1-20` it does the same over a whole range, to find properties the integration doesn't know yet.
+### To 2.0.0 on a TP20
 
-   Properties found to crash a model go in `UNSAFE_PROPS` in `const.py`. The integration never reads them, and all the tools skip them. On such models `discover_properties.py` refuses its batched scan unless you pass `--force`, and `monitor_properties.py` watches only known properties unless you pass `--full-scan`. The TP20 (`dreame.airp.u2630`) crashes, and comes back switched off, when 3.10 is read.
-4. Add the model to `custom_components/dreame_airpurifier/`: its own property table in `MODEL_PROP_DEFS` (`api.py`) if its property numbers differ from the PM10's `PROP_DEFS`, and a `ModelProfile` in `PROFILES` (`const.py`) for its modes, speed count and timer limit. The tools pick up the model's table automatically.
+Versions before 2.0.0 used the PM10's property map on the TP20. After updating, remove these leftover entities, which will show as unavailable:
 
-The same property list is logged once at startup at INFO level. To see it:
+- **Air Quality** (the old percentage; replaced by Air Quality Level)
+- **HEPA Filter Days Total** (replaced by HEPA Filter Days Left)
 
-```yaml
-logger:
-  logs:
-    custom_components.dreame_airpurifier: info
-```
+The existing **Continuous Monitoring** switch is kept and now controls the right setting.
+
+## Troubleshooting
+
+- **Diagnostics:** device page → ⋮ → **Download diagnostics** lists every raw property the purifier reported (`siid.piid`: value), which attributes it doesn't have, and any skipped as unsafe. It contains no credentials, device IDs or MACs.
+- **Startup log:** the same list is logged once at INFO level. To see it:
+  ```yaml
+  logger:
+    logs:
+      custom_components.dreame_airpurifier: info
+  ```
+- **The purifier restarts or switches itself off when Home Assistant polls it:** disable the integration entry, then find the cause with `tools/safe_probe.py` (see below).
 
 ## Known issues
 
 - The Dreame API is IPv4-only. It can fail if Home Assistant routes through a Tailscale exit node.
-- On the PM10, the swivel range stays as set when follow mode is on. The Dreame app behaves the same way.
-- The follow-mode mmWave radar is handled on the device and isn't exposed through the API.
+- **TP20:** reading property 3.10 crashes the purifier (it restarts switched off). The integration and the tools never read it.
+- **TP20:** power is switched with a toggle command, because the power property is read-only. The integration reads the power state right before toggling so it can't flip the wrong way.
+- **TP20:** the Air Quality Level names assume level 1 is Excellent and 5 is Bad. If Home Assistant and the app disagree, please open an issue.
+- **PM10:** the swivel range stays as set when follow mode is on. The Dreame app behaves the same way.
+- **PM10:** the follow-mode mmWave radar is handled on the device and isn't exposed through the API.
+
+## Adding a model
+
+The scripts in `tools/` map a purifier's properties through the Dreame cloud. They need Python 3 and `requests` (`pip install requests`), and run from the `tools` folder:
+
+| Script | What it does |
+|---|---|
+| `safe_probe.py` | Reads properties **one at a time**, checks the purifier still answers after each, and stops at the first one that causes trouble. `--scan --siids 1-8 --piids 1-20` probes a whole range to find unknown properties. **Start here**, especially if the purifier misbehaves |
+| `monitor_properties.py` | Watches values change live while you use the Dreame app: the quickest way to work out what each property means |
+| `discover_properties.py` | Fast batched scan of every property. Refused on models known to crash on some reads, unless `--force` |
+| `set_property.py` | Reads or writes a single property, or calls an action |
+
+```sh
+python safe_probe.py -u <email> -p '<password>' --country <region> --confirm
+python monitor_properties.py -u <email> -p '<password>' --country <region>
+```
+
+Use single quotes around the password: some shells drop characters like `$` otherwise. The scripts never print device IDs or MACs, but full scans can show values such as the device's time zone, so check before sharing output.
+
+To add a model to the integration (`custom_components/dreame_airpurifier/`):
+
+1. **Property table:** if its property numbers differ from the PM10's `PROP_DEFS`, add its own table to `MODEL_PROP_DEFS` in `api.py` (see `TP20_PROP_DEFS`).
+2. **Profile:** add a `ModelProfile` to `PROFILES` in `const.py` for its modes, speed count, manual mode, timer limit and, if the app names them, air quality levels.
+3. **Unsafe reads:** if reading a property crashes it, add it to `UNSAFE_PROPS` in `const.py`. The integration and all the tools will skip it.
+
+The tools read these tables, so they label properties for the new model automatically. `re.txt` has the PM10's map as a reference.
 
 ## Credits
 
