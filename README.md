@@ -45,7 +45,7 @@ Only entities for features your purifier actually has are created.
 
 | | TP20 | PM10 |
 |---|---|---|
-| **Fan** | On/off, 3 speeds, presets **AI Purify** / **Sleep** / **Custom** | On/off, 10 speeds, presets Auto / Comfort / Custom / Pet |
+| **Fan** | 3 speeds, presets **AI Purify** / **Sleep** / **Custom**. No on/off: switch it on and off from the Dreame app or its power button | On/off, 10 speeds, presets Auto / Comfort / Custom / Pet |
 | **Sensors** | PM2.5, Air Quality Level (Excellent / Good / Moderate / Poor / Bad), Fan Level, HEPA Filter Life, HEPA Filter Days Left | PM2.5, PM10, PM1, TVOC, HCHO, temperature, humidity, air quality level and %, HEPA and carbon filter life and usage |
 | **Switches** | Child Lock, Continuous Monitoring (measures air quality while off) | Continuous Monitoring, Human Sensing, Follow Mode, Voice Assistant |
 | **Selects** | Temperature unit | Swivel angle, temperature unit |
@@ -79,7 +79,7 @@ The existing **Continuous Monitoring** switch is kept and now controls the right
 
 - The Dreame API is IPv4-only. It can fail if Home Assistant routes through a Tailscale exit node.
 - **TP20:** reading property 3.10 crashes the purifier (it restarts switched off). The integration and the tools never read it.
-- **TP20:** power is switched with a toggle command, because the power property is read-only. The integration reads the power state right before toggling so it can't flip the wrong way.
+- **TP20:** Home Assistant can't switch it on or off. The power property is read-only, and the action that toggles power on the PM10 (2/3) crashes the TP20: it goes dead until its power button is pressed, and may then not reconnect to Wi-Fi. The integration never sends that action (`UNSAFE_ACTIONS` in `const.py`), and `set_property.py` refuses it. Speed and preset changes are refused while the TP20 is off.
 - **TP20:** the Air Quality Level names assume level 1 is Excellent and 5 is Bad. If Home Assistant and the app disagree, please open an issue.
 - **PM10:** the swivel range stays as set when follow mode is on. The Dreame app behaves the same way.
 - **PM10:** the follow-mode mmWave radar is handled on the device and isn't exposed through the API.
@@ -106,7 +106,7 @@ To add a model to the integration (`custom_components/dreame_airpurifier/`):
 
 1. **Property table:** if its property numbers differ from the PM10's `PROP_DEFS`, add its own table to `MODEL_PROP_DEFS` in `api.py` (see `TP20_PROP_DEFS`).
 2. **Profile:** add a `ModelProfile` to `PROFILES` in `const.py` for its modes, speed count, manual mode, timer limit and, if the app names them, air quality levels.
-3. **Unsafe reads:** if reading a property crashes it, add it to `UNSAFE_PROPS` in `const.py`. The integration and all the tools will skip it.
+3. **Unsafe reads and actions:** if reading a property crashes it, add it to `UNSAFE_PROPS` in `const.py`; if calling an action does, add it to `UNSAFE_ACTIONS`. The integration and the tools will never send them. A model without a safe power action gets `power_action=None` in its profile.
 
 The tools read these tables, so they label properties for the new model automatically. `re.txt` has the PM10's map as a reference.
 

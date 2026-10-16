@@ -48,9 +48,9 @@ def load_known_props(model: str | None = None, path: Path = INTEGRATION_API) -> 
     return tables.get(model_tables.get(model), tables.get("PROP_DEFS", {}))
 
 
-def load_unsafe_props(path: Path = INTEGRATION_CONST) -> dict:
-    """Return {model: {(siid, piid), ...}} from UNSAFE_PROPS in the integration's const.py:
-    properties that crash that model when read, so the tools must never request them."""
+def load_unsafe_props(path: Path = INTEGRATION_CONST, name: str = "UNSAFE_PROPS") -> dict:
+    """Return {model: {(siid, n), ...}} from UNSAFE_PROPS (properties that crash that model
+    when read) or UNSAFE_ACTIONS (actions that crash it) in the integration's const.py."""
     try:
         tree = ast.parse(path.read_text())
     except (OSError, SyntaxError) as ex:
@@ -58,7 +58,7 @@ def load_unsafe_props(path: Path = INTEGRATION_CONST) -> dict:
         return {}
     for node in tree.body:
         target = getattr(node, "target", None) or (node.targets[0] if isinstance(node, ast.Assign) else None)
-        if getattr(target, "id", None) != "UNSAFE_PROPS" or not isinstance(node.value, ast.Dict):
+        if getattr(target, "id", None) != name or not isinstance(node.value, ast.Dict):
             continue
         out = {}
         for k, v in zip(node.value.keys, node.value.values):
@@ -71,6 +71,10 @@ def load_unsafe_props(path: Path = INTEGRATION_CONST) -> dict:
 
 def unsafe_for(model: str) -> set:
     return load_unsafe_props().get(model, set())
+
+
+def unsafe_actions_for(model: str) -> set:
+    return load_unsafe_props(name="UNSAFE_ACTIONS").get(model, set())
 
 
 _ids = None

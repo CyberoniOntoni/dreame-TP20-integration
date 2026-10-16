@@ -6,6 +6,7 @@ from typing import Any
 from homeassistant.components.fan import FanEntity, FanEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -28,10 +29,21 @@ class DreameFan(DreameEntity, FanEntity):
         self._attr_unique_id = f"{purifier.unique_id}_fan"
         self._attr_speed_count = self._profile.speed_count
         self._attr_preset_modes = list(self._profile.modes.values())
-        self._attr_supported_features = (
-            FanEntityFeature.SET_SPEED | FanEntityFeature.PRESET_MODE
-            | FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
-        )
+        features = FanEntityFeature.SET_SPEED | FanEntityFeature.PRESET_MODE
+        if purifier.can_switch_power:
+            features |= FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
+        self._attr_supported_features = features
+
+    def _check_controllable(self) -> None:
+        """On models without power control (TP20), refuse anything that needs power
+        switched, and anything while it's off (writes to a switched-off TP20 are untested)."""
+        if self._purifier.can_switch_power:
+            return
+        if not self._purifier.is_on:
+            raise HomeAssistantError(
+                f"{self._purifier.name} is off. Switch it on from the Dreame app or its power button; "
+                "Home Assistant can't switch this model on or off."
+            )
 
     def _pct_to_speed(self, percentage: int) -> int:
         """Convert HA percentage (0-100) to device speed level (1..speed_count)."""
@@ -57,6 +69,14 @@ class DreameFan(DreameEntity, FanEntity):
         return {"fan_speed_level": self._purifier.fan_speed}
 
     async def async_turn_on(self, percentage=None, preset_mode=None, **kwargs) -> None:
+        self._check_controllable()
+        if not self._purifier.can_switch_power:
+            # Already on: just apply the preset or speed.
+            if preset_mode is not None:
+                await self.async_set_preset_mode(preset_mode)
+            if percentage:
+                await self.async_set_percentage(percentage)
+            return
         if preset_mode is not None:
             mode = self._profile.mode_by_name.get(preset_mode)
         elif percentage:
@@ -69,12 +89,17 @@ class DreameFan(DreameEntity, FanEntity):
         await self._write(*steps, action="turn on" + (f" in {preset_mode}" if preset_mode else ""))
 
     async def async_turn_off(self, **kwargs) -> None:
+        if not self._purifier.can_switch_power:
+            raise HomeAssistantError(
+                f"Home Assistant can't switch {self._purifier.name} off. Use the Dreame app or its power button."
+            )
         await self._write(self._purifier.turn_off(), action="turn off")
 
     async def async_set_percentage(self, percentage: int) -> None:
         if percentage == 0:
             await self.async_turn_off()
             return
+        self._check_controllable()
         steps = []
         if self._purifier.mode_value != self._profile.manual_mode:
             steps.append(self._purifier.set_mode(self._profile.manual_mode))
@@ -83,5 +108,6 @@ class DreameFan(DreameEntity, FanEntity):
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         mode_value = self._profile.mode_by_name.get(preset_mode)
+        self._check_controllable()
         if mode_value is not None:
             await self._write(self._purifier.set_mode(mode_value), action=f"switch to {preset_mode}")
