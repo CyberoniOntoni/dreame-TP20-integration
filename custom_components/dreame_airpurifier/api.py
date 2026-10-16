@@ -487,7 +487,7 @@ class DreameAirPurifier:
             return False
         return await self._api.set_property(self._did, p.siid, p.piid, value, self._host)
 
-    async def _refresh_power(self) -> None:
+    async def refresh_power(self) -> None:
         """Read power right before toggling, so a stale poll can't flip it the wrong way."""
         p = self._def("power")
         if p is None:
@@ -514,13 +514,13 @@ class DreameAirPurifier:
         return await self._call_action(*self._profile.power_action)
 
     async def turn_on(self, mode: int | None = None) -> bool:
-        await self._refresh_power()
+        await self.refresh_power()
         if not self.is_on and not await self.toggle_power():
             return False
         return await self.set_mode(mode) if mode is not None else True
 
     async def turn_off(self) -> bool:
-        await self._refresh_power()
+        await self.refresh_power()
         return await self.toggle_power() if self.is_on else True
 
     async def set_mode(self, mode: int) -> bool:

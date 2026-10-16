@@ -34,11 +34,13 @@ class DreameFan(DreameEntity, FanEntity):
             features |= FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF
         self._attr_supported_features = features
 
-    def _check_controllable(self) -> None:
-        """On models without power control (TP20), refuse anything that needs power
-        switched, and anything while it's off (writes to a switched-off TP20 are untested)."""
+    async def _ensure_controllable(self) -> None:
+        """On models without power control (TP20), refuse fan changes while it's off:
+        writes to a switched-off TP20 are untested. Power is read fresh (a single read of
+        it is safe), since the last poll can be up to 30 s old."""
         if self._purifier.can_switch_power:
             return
+        await self._purifier.refresh_power()
         if not self._purifier.is_on:
             raise HomeAssistantError(
                 f"{self._purifier.name} is off. Switch it on from the Dreame app or its power button; "
@@ -69,13 +71,14 @@ class DreameFan(DreameEntity, FanEntity):
         return {"fan_speed_level": self._purifier.fan_speed}
 
     async def async_turn_on(self, percentage=None, preset_mode=None, **kwargs) -> None:
-        self._check_controllable()
         if not self._purifier.can_switch_power:
-            # Already on: just apply the preset or speed.
+            # Can't switch power: just apply the preset or speed (each checks it's on).
             if preset_mode is not None:
                 await self.async_set_preset_mode(preset_mode)
             if percentage:
                 await self.async_set_percentage(percentage)
+            if preset_mode is None and not percentage:
+                await self._ensure_controllable()
             return
         if preset_mode is not None:
             mode = self._profile.mode_by_name.get(preset_mode)
@@ -99,7 +102,7 @@ class DreameFan(DreameEntity, FanEntity):
         if percentage == 0:
             await self.async_turn_off()
             return
-        self._check_controllable()
+        await self._ensure_controllable()
         steps = []
         if self._purifier.mode_value != self._profile.manual_mode:
             steps.append(self._purifier.set_mode(self._profile.manual_mode))
@@ -108,6 +111,6 @@ class DreameFan(DreameEntity, FanEntity):
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         mode_value = self._profile.mode_by_name.get(preset_mode)
-        self._check_controllable()
+        await self._ensure_controllable()
         if mode_value is not None:
             await self._write(self._purifier.set_mode(mode_value), action=f"switch to {preset_mode}")

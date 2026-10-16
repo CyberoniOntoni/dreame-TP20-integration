@@ -79,7 +79,7 @@ The existing **Continuous Monitoring** switch is kept and now controls the right
 
 - The Dreame API is IPv4-only. It can fail if Home Assistant routes through a Tailscale exit node.
 - **TP20:** reading property 3.10 crashes the purifier (it restarts switched off). The integration and the tools never read it.
-- **TP20:** Home Assistant can't switch it on or off. The power property is read-only, and the action that toggles power on the PM10 (2/3) crashes the TP20: it goes dead until its power button is pressed, and may then not reconnect to Wi-Fi. The integration never sends that action (`UNSAFE_ACTIONS` in `const.py`), and `set_property.py` refuses it. Speed and preset changes are refused while the TP20 is off.
+- **TP20:** Home Assistant can't switch it on or off. The power property is read-only, and the action that toggles power on the PM10 (2/3) crashes the TP20: it goes dead until its power button is pressed, and may then not reconnect to Wi-Fi. The integration never sends that action (`UNSAFE_ACTIONS` in `const.py`), and `set_property.py` refuses it. Speed and preset changes are refused while the TP20 is off (its power state is read fresh first), because writes to a switched-off TP20 haven't been tested. Settings (child lock, continuous monitoring, timer, temperature unit) can still be changed while it's off, as in the Dreame app.
 - **TP20:** the Air Quality Level names assume level 1 is Excellent and 5 is Bad. If Home Assistant and the app disagree, please open an issue.
 - **PM10:** the swivel range stays as set when follow mode is on. The Dreame app behaves the same way.
 - **PM10:** the follow-mode mmWave radar is handled on the device and isn't exposed through the API.
