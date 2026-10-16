@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 import aiohttp
 
-from .const import MODE_AUTO, SWIVEL_OPTIONS, UNSAFE_PROPS, ModelProfile, profile_for
+from .const import MODE_AUTO, SWIVEL_OPTIONS, UNSAFE_ACTIONS, UNSAFE_PROPS, ModelProfile, profile_for
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,7 +103,6 @@ _BATCH_SIZE = 15
 def _batches(defs: tuple[PropDef, ...]) -> tuple[tuple[PropDef, ...], ...]:
     return tuple(defs[i : i + _BATCH_SIZE] for i in range(0, len(defs), _BATCH_SIZE))
 
-ACTION_TOGGLE_POWER = (2, 3)  # (siid, aiid)
 
 # Every request gets its own id. With a fixed id, replies got mixed up when another
 # client (the app, a tool) talked to the device at the same time.
@@ -497,8 +496,22 @@ class DreameAirPurifier:
         if values and (p.siid, p.piid) in values:
             self._state["power"] = values[(p.siid, p.piid)]
 
+    @property
+    def can_switch_power(self) -> bool:
+        return self._profile.power_action is not None
+
+    async def _call_action(self, siid: int, aiid: int) -> bool:
+        """Call an action, refusing any known to crash this model."""
+        if (siid, aiid) in UNSAFE_ACTIONS.get(self._model, frozenset()):
+            _LOGGER.error("%s: action %s/%s is known to crash %s; not sending it", self._name, siid, aiid, self._model)
+            return False
+        return await self._api.call_action(self._did, siid, aiid, host=self._host)
+
     async def toggle_power(self) -> bool:
-        return await self._api.call_action(self._did, *ACTION_TOGGLE_POWER, host=self._host)
+        if self._profile.power_action is None:
+            _LOGGER.warning("%s: %s can't be switched on or off from Home Assistant", self._name, self._model)
+            return False
+        return await self._call_action(*self._profile.power_action)
 
     async def turn_on(self, mode: int | None = None) -> bool:
         await self._refresh_power()
@@ -546,7 +559,7 @@ class DreameAirPurifier:
         return await self._set_attr("timer", max(0, min(self._profile.timer_max, hours)))
 
     async def reset_hepa_filter(self) -> bool:
-        return await self._api.call_action(self._did, 4, 1, host=self._host)
+        return await self._call_action(4, 1)
 
     async def reset_carbon_filter(self) -> bool:
-        return await self._api.call_action(self._did, 5, 1, host=self._host)
+        return await self._call_action(5, 1)

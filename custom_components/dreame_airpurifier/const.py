@@ -33,6 +33,9 @@ class ModelProfile:
     # Air quality level value -> state key, for models whose app names the levels.
     # Keys are translated in strings.json (entity.sensor.air_quality.state).
     aq_levels: dict[int, str] | None = None
+    # (siid, aiid) of the action that toggles power, or None if the model has no
+    # known safe way to switch power from here.
+    power_action: tuple[int, int] | None = (2, 3)
 
     @property
     def mode_by_name(self) -> dict[str, int]:
@@ -49,6 +52,9 @@ PROFILES: dict[str, ModelProfile] = {
         modes={0: "AI Purify", 2: "Sleep", 3: "Custom"}, manual_mode=3, speed_count=3, timer_max=12,
         # The app shows five levels. 3.4 was seen at 1-4, rising with PM2.5; order assumed ascending.
         aq_levels={1: "excellent", 2: "good", 3: "moderate", 4: "poor", 5: "bad"},
+        # 2.1 power is read-only (-4002), and action 2/3 crashes the TP20: it goes dead,
+        # needs its power button, and can lose its Wi-Fi connection. No power control.
+        power_action=None,
     ),
 }
 
@@ -62,4 +68,11 @@ SWIVEL_OPTIONS = (0, 45, 90, 180)
 # dreame.airp.u2630 (TP20): reading 3.10 makes the device stop responding and reboot.
 UNSAFE_PROPS: dict[str, frozenset[tuple[int, int]]] = {
     "dreame.airp.u2630": frozenset({(3, 10)}),
+}
+
+# Actions (siid, aiid) that must never be called on a given model.
+# dreame.airp.u2630 (TP20): action 2/3 (toggle power on the PM10) crashes it; it stays
+# off until its power button is pressed and may then not reconnect to Wi-Fi.
+UNSAFE_ACTIONS: dict[str, frozenset[tuple[int, int]]] = {
+    "dreame.airp.u2630": frozenset({(2, 3)}),
 }
