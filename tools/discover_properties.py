@@ -272,22 +272,21 @@ def probe_extended_properties(prober: DreameCloudProber, did: str, host: str, sk
 
 def probe_actions(prober: DreameCloudProber, did: str, host: str):
     """
-    Test known and potential actions (siid/aiid combinations).
-    Only probes actions that are read-safe (no state changes).
+    List known and candidate actions (siid/aiid combinations). Nothing is called.
     """
     log.info("\n" + "=" * 70)
     log.info("  PHASE 3: ACTION DISCOVERY (safe read-only probes)")
     log.info("=" * 70)
-    log.info("  NOTE: We only REPORT action availability, we don't invoke them.")
-    log.info("  Actions will be tested with empty params to see if siid/aiid exists.\n")
+    log.info("  NOTE: these are only listed, never called. Calling an unknown action can")
+    log.info("  crash the device (2/3 crashes the TP20). Test one at a time, if at all.\n")
 
-    log.info("  Actions the integration uses: 2.3 toggle power, 4.1 reset HEPA filter, 5.1 reset carbon filter")
+    log.info("  Actions the integration uses on the PM10: 2/3 toggle power, 4/1 reset HEPA filter, 5/1 reset carbon filter")
 
     # Candidate actions to check (listed only, never executed)
     action_candidates = [
         (2, 1, "Start/Stop"),
         (2, 2, "Unknown action 2.2"),
-        (2, 3, "Toggle Power (used by integration)"),
+        (2, 3, "Toggle power on the PM10. CRASHES THE TP20: never call it there"),
         (2, 4, "Unknown action 2.4"),
         (2, 5, "Unknown action 2.5"),
         (4, 1, "Reset HEPA filter (used by integration)"),
